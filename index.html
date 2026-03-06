@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Let's Dance 2026 – Wertungen</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold:#D4A017;--gold-light:#F0C840;--dark:#0D0D0D;--surface:#161616;
+    --card:#1E1E1E;--border:#2A2A2A;--text:#F0EDE8;--muted:#777;
+    --red:#E84040;--green:#2ECC71;
+    --cy:#D4A017;--cl:#E84040;--cm:#C06EE8;--cj:#3CB4F0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'DM Sans',sans-serif;background:var(--dark);color:var(--text);min-height:100vh;padding-bottom:56px;}
+
+  header{background:var(--surface);border-bottom:2px solid var(--gold);padding:12px 16px;position:sticky;top:0;z-index:200;display:flex;align-items:center;gap:10px;}
+  .logo{font-family:'Bebas Neue',cursive;font-size:24px;letter-spacing:3px;color:var(--gold);flex:1;}
+  #sync-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:background .3s;}
+  #sync-dot.ok{background:var(--green);}
+  #sync-dot.err{background:var(--red);}
+  #sync-dot.local{background:#a0a0a0;}
+  #sync-dot.loading{background:var(--gold);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  .mode-bar{display:flex;background:var(--surface);border-bottom:1px solid var(--border);padding:8px 14px;gap:8px;align-items:center;}
+  .mode-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);flex-shrink:0;}
+  .mode-btns{display:flex;gap:5px;flex:1;}
+  .mbtn{flex:1;padding:6px 10px;border-radius:20px;border:1px solid var(--border);background:none;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap;}
+  .mbtn.active.local{background:#252525;border-color:#888;color:var(--text);}
+  .mbtn.active.cloud{background:#0a2040;border-color:#3CB4F0;color:#3CB4F0;}
+  .mbtn.active.both{background:#0a2010;border-color:var(--green);color:var(--green);}
+
+  .tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto;}
+  .tb{padding:10px 15px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:.5px;transition:all .2s;}
+  .tb.active{color:var(--gold);border-bottom-color:var(--gold);}
+
+  .view{display:none;padding:16px;max-width:620px;margin:0 auto;}
+  .view.active{display:block;}
+
+  .stitle{font-family:'Bebas Neue',cursive;font-size:20px;letter-spacing:2px;color:var(--gold);margin-bottom:14px;margin-top:20px;}
+  .stitle:first-child{margin-top:4px;}
+
+  .field{margin-bottom:13px;}
+  label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:5px;}
+  input[type="date"],select,input[type="text"]{width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:11px 13px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:15px;outline:none;transition:border-color .2s;-webkit-appearance:none;}
+  input:focus,select:focus{border-color:var(--gold);}
+  select option{background:#1a1a1a;}
+
+  .dance-hint{display:inline-block;background:#1a2a10;border:1px solid #3a6020;color:#7dbe50;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;margin-bottom:6px;}
+  .dance-hint.warn{background:#2a1a10;border-color:#604020;color:#be8050;}
+
+  .btn{width:100%;background:var(--gold);color:#000;border:none;border-radius:8px;padding:14px;font-family:'Bebas Neue',cursive;font-size:19px;letter-spacing:2px;cursor:pointer;transition:background .2s,transform .1s;margin-top:4px;}
+  .btn:active{transform:scale(.98);}
+  .btn:hover{background:var(--gold-light);}
+  .btn.sec{background:var(--card);color:var(--text);border:1px solid var(--border);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;letter-spacing:0;}
+  .btn.danger{background:transparent;color:var(--red);border:1px solid var(--red);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;letter-spacing:0;}
+
+  .plist{background:var(--card);border:1px solid var(--border);border-radius:8px;max-height:260px;overflow-y:auto;padding:4px;}
+  .pci{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:background .15s;}
+  .pci:hover{background:#252525;}
+  .pci input[type="checkbox"]{width:17px;height:17px;accent-color:var(--gold);flex-shrink:0;}
+  .pcn{font-size:14px;font-weight:600;}
+  .pcp{font-size:11px;color:var(--gold);margin-top:1px;}
+
+  .sbar{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:12px;color:var(--muted);margin-bottom:16px;}
+  .sbar strong{color:var(--gold);font-weight:600;}
+
+  .pblock{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:18px;overflow:hidden;}
+  .pbh{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:var(--surface);border-bottom:1px solid var(--border);}
+  .pbn{font-size:15px;font-weight:700;}
+  .pbp{font-size:11px;color:var(--gold);margin-top:2px;font-weight:500;}
+
+  .dtabs{display:flex;border-bottom:1px solid var(--border);overflow-x:auto;}
+  .dtab{padding:8px 14px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .2s;}
+  .dtab.active{color:var(--gold);border-bottom-color:var(--gold);}
+  .dpanel{display:none;padding:14px 16px;}
+  .dpanel.active{display:block;}
+
+  .rrow{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .rrow:last-child{margin-bottom:0;}
+  .rlbl{font-size:12px;font-weight:700;min-width:56px;text-transform:uppercase;letter-spacing:.5px;}
+  .rlbl.you{color:var(--cy);}.rlbl.llambi{color:var(--cl);}.rlbl.motsi{color:var(--cm);}.rlbl.jorge{color:var(--cj);}
+  .sbtns{display:flex;gap:3px;flex:1;}
+  .sb{flex:1;height:30px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .12s;font-family:'DM Sans',sans-serif;}
+  .sb.ay{background:var(--cy);border-color:var(--cy);color:#000;}
+  .sb.al{background:var(--cl);border-color:var(--cl);color:#fff;}
+  .sb.am{background:var(--cm);border-color:var(--cm);color:#fff;}
+  .sb.aj{background:var(--cj);border-color:var(--cj);color:#000;}
+
+  .pfooter{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--surface);border-top:1px solid var(--border);gap:6px;flex-wrap:wrap;}
+  .spills{display:flex;gap:5px;flex-wrap:wrap;}
+  .spill{font-size:11px;font-weight:700;padding:3px 7px;border-radius:20px;background:#1a1a1a;}
+  .spill.you{color:var(--cy);border:1px solid var(--cy);}
+  .spill.llambi{color:var(--cl);border:1px solid var(--cl);}
+  .spill.motsi{color:var(--cm);border:1px solid var(--cm);}
+  .spill.jorge{color:var(--cj);border:1px solid var(--cj);}
+
+  .hcard{background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:12px;overflow:hidden;}
+  .hch{padding:12px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
+  .hrnd{font-family:'Bebas Neue',cursive;font-size:17px;color:var(--gold);letter-spacing:1px;}
+  .hmeta{font-size:11px;color:var(--muted);margin-top:2px;}
+  .hsrc{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:2px 6px;border-radius:10px;margin-left:5px;vertical-align:middle;}
+  .hsrc.local{background:#252525;color:#888;}
+  .hsrc.cloud{background:#0a2040;color:#3CB4F0;}
+  .htog{color:var(--muted);font-size:14px;transition:transform .2s;}
+  .htog.open{transform:rotate(180deg);}
+  .hbody{display:none;}
+  .hbody.open{display:block;}
+  .hpair{padding:10px 16px;border-top:1px solid var(--border);}
+  .hpn{font-weight:700;font-size:13px;margin-bottom:4px;}
+  .hpp{font-size:10px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+  .hdance{display:flex;justify-content:space-between;align-items:center;margin-top:5px;font-size:12px;color:var(--muted);}
+  .hds{display:flex;gap:7px;font-weight:700;font-size:11px;}
+  .hy{color:var(--cy);}.hl{color:var(--cl);}.hm{color:var(--cm);}.hj{color:var(--cj);}
+  .delb{background:none;border:none;cursor:pointer;color:var(--muted);font-size:15px;padding:2px 6px;border-radius:4px;transition:color .2s;}
+  .delb:hover{color:var(--red);}
+
+  .ibox{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px;}
+  .ibox .it{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:10px;}
+
+  .config-box{background:#0a1a2a;border:1px solid #1a4a7a;border-radius:12px;padding:18px;margin-bottom:16px;}
+  .config-box .ct{font-family:'Bebas Neue',cursive;font-size:17px;color:#3CB4F0;letter-spacing:2px;margin-bottom:12px;}
+  .config-box input{margin-bottom:8px;border-color:#1a4a7a;background:#081218;}
+  .config-box input:focus{border-color:#3CB4F0;}
+  .config-box .note{font-size:11px;color:var(--muted);line-height:1.7;margin-top:10px;}
+  .config-box .note a{color:#3CB4F0;text-decoration:none;}
+
+  .storage-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+  .stat-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;}
+  .stat-box .sn{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:6px;}
+  .stat-box .sv{font-family:'Bebas Neue',cursive;font-size:32px;color:var(--gold);letter-spacing:1px;}
+  .stat-box .sd{font-size:11px;color:var(--muted);margin-top:2px;}
+  .stat-box.cloud-box{border-color:#1a4a7a;}
+  .stat-box.cloud-box .sv{color:#3CB4F0;}
+
+  .show-table{width:100%;border-collapse:collapse;font-size:12px;}
+  .show-table th{text-align:left;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:10px;padding:6px 8px;border-bottom:1px solid var(--border);}
+  .show-table td{padding:7px 8px;border-bottom:1px solid #1f1f1f;vertical-align:middle;}
+  .show-table tr:last-child td{border-bottom:none;}
+  .show-table .badge{display:inline-block;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700;}
+  .t1{background:#1a2010;color:#8dcc50;border:1px solid #4a7030;}
+  .t2{background:#10202a;color:#50aacc;border:1px solid #306070;}
+  .t3{background:#2a1020;color:#cc50aa;border:1px solid #702060;}
+  .tsp{background:#2a2010;color:#ccaa50;border:1px solid #706030;}
+  .t0{background:#1a1a1a;color:var(--muted);border:1px solid var(--border);}
+
+  .div{height:1px;background:var(--border);margin:14px 0;}
+  .empty{text-align:center;padding:48px 20px;color:var(--muted);}
+  .empty .ei{font-size:44px;margin-bottom:12px;}
+  .empty p{font-size:13px;line-height:1.6;}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(90px);background:var(--green);color:#000;padding:11px 22px;border-radius:50px;font-weight:700;font-size:13px;transition:transform .3s;z-index:999;pointer-events:none;max-width:90vw;text-align:center;}
+  .toast.show{transform:translateX(-50%) translateY(0);}
+  .toast.err{background:var(--red);color:#fff;}
+  .toast.warn{background:#D4A017;color:#000;}
+
+  ::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Let's Dance 2026</div>
+  <div id="sync-dot" class="local" title="Speicher-Status"></div>
+  <div style="font-size:9px;color:var(--muted);text-align:right;line-height:1.6;">Staffel 19<br>Wertungen</div>
+</header>
+
+<!-- Speichermodus -->
+<div class="mode-bar">
+  <div class="mode-label">Speichern:</div>
+  <div class="mode-btns">
+    <button class="mbtn active local" id="mb-local"  onclick="setMode('local')" >📱 Lokal</button>
+    <button class="mbtn cloud"        id="mb-cloud"  onclick="setMode('cloud')" >☁️ Firebase</button>
+    <button class="mbtn both"         id="mb-both"   onclick="setMode('both')"  >🔄 Beides</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tb active" onclick="showTab('rate',this)">🎬 Wertung</button>
+  <button class="tb" onclick="showTab('history',this)">📋 Verlauf</button>
+  <button class="tb" onclick="showTab('storage',this)">💾 Speicher</button>
+  <button class="tb" onclick="showTab('info',this)">ℹ️ Info</button>
+</div>
+
+<!-- WERTUNG -->
+<div class="view active" id="view-rate">
+  <div id="setup">
+    <div class="stitle">Show auswählen</div>
+    <div class="field">
+      <label>📺 Folge / Runde</label>
+      <select id="show-round" onchange="onShowChange()">
+        <option value="">– Folge wählen –</option>
+        <option value="Kennenlernshow|0|2026-02-27">Kennenlernshow – 27. Feb. 2026</option>
+        <option value="Show 1|1|2026-03-06">Show 1 – 6. März 2026</option>
+        <option value="Show 2|1|2026-03-13">Show 2 – 13. März 2026</option>
+        <option value="Show 3|1|2026-03-20">Show 3 – 20. März 2026</option>
+        <option value="Show 4|1|2026-03-29">Show 4 – 29. März 2026 (Sonntag)</option>
+        <option value="Show 5|1|2026-04-03">Show 5 – 3. April 2026</option>
+        <option value="Show 6 – Jury-Challenge|2|2026-04-10">Show 6 – 10. April 2026 (Jury-Challenge)</option>
+        <option value="Show 7|1|2026-04-17">Show 7 – 17. April 2026</option>
+        <option value="Show 8 – Partner Switch|2|2026-04-24">Show 8 – 24. April 2026 (Partner-Switch)</option>
+        <option value="Show 9|2|2026-05-01">Show 9 – 1. Mai 2026</option>
+        <option value="Show 10 – Viertelfinale|2|2026-05-08">Show 10 – 8. Mai 2026 (Viertelfinale)</option>
+        <option value="Show 11 – Halbfinale|2|2026-05-15">Show 11 – 15. Mai 2026 (Halbfinale)</option>
+        <option value="Show 12 – Finale|3|2026-05-22">Show 12 – 22./29. Mai 2026 (Finale)</option>
+      </select>
+    </div>
+    <div id="dance-hint-box"></div>
+    <div class="field">
+      <label>💃 Tänze pro Paar <span style="color:var(--muted);text-transform:none;letter-spacing:0;font-weight:400">(voreingestellt, anpassbar)</span></label>
+      <select id="num-dances">
+        <option value="1">1 Tanz</option>
+        <option value="2">2 Tänze</option>
+        <option value="3">3 Tänze</option>
+        <option value="4">4 Tänze</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>👥 Paare in dieser Show</label>
+      <div class="plist" id="pair-cbs"></div>
+    </div>
+    <button class="btn" onclick="startRating()">▶ WERTUNG STARTEN</button>
+  </div>
+
+  <div id="rating" style="display:none;">
+    <div class="div"></div>
+    <div class="sbar" id="sbar"></div>
+    <div id="pairs-con"></div>
+    <button class="btn" onclick="saveSession()">💾 WERTUNGEN SPEICHERN</button>
+    <button class="btn sec" style="margin-top:8px;" onclick="backToSetup()">← Zurück</button>
+  </div>
+</div>
+
+<!-- VERLAUF -->
+<div class="view" id="view-history">
+  <div class="div"></div>
+  <div class="stitle">Alle Wertungen</div>
+  <div id="history-list"></div>
+</div>
+
+<!-- SPEICHER -->
+<div class="view" id="view-storage">
+  <div class="div"></div>
+  <div class="stitle">💾 Speicher & Einstellungen</div>
+
+  <div class="storage-stats">
+    <div class="stat-box">
+      <div class="sn">📱 Lokal</div>
+      <div class="sv" id="stat-local">0</div>
+      <div class="sd">Wertungen auf diesem Gerät</div>
+    </div>
+    <div class="stat-box cloud-box">
+      <div class="sn">☁️ Firebase</div>
+      <div class="sv" id="stat-cloud">–</div>
+      <div class="sd">Wertungen in der Cloud</div>
+    </div>
+  </div>
+
+  <div class="ibox">
+    <div class="it">Speichermodus – aktiver Modus oben in der Leiste wählbar</div>
+    <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;">
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <span style="font-size:18px;flex-shrink:0;">📱</span>
+        <div><strong style="color:var(--text);">Lokal</strong>
+        <br><span style="color:var(--muted);font-size:12px;">Gespeichert im Browser-Speicher dieses Geräts. Funktioniert <strong style="color:var(--text)">offline</strong>. Daten können verloren gehen wenn Browser-Daten gelöscht werden.</span></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <span style="font-size:18px;flex-shrink:0;">☁️</span>
+        <div><strong style="color:#3CB4F0;">Firebase</strong>
+        <br><span style="color:var(--muted);font-size:12px;">Gespeichert in der Cloud. Von <strong style="color:var(--text)">jedem Gerät</strong> abrufbar. Benötigt Internet und Firebase-Konfiguration.</span></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <span style="font-size:18px;flex-shrink:0;">🔄</span>
+        <div><strong style="color:var(--green);">Beides</strong>
+        <br><span style="color:var(--muted);font-size:12px;">Jede Wertung wird <strong style="color:var(--text)">gleichzeitig lokal und in Firebase</strong> gespeichert. Maximale Sicherheit.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="config-box">
+    <div class="ct">☁️ Firebase-Konfiguration</div>
+    <label>API Key</label>
+    <input type="text" id="fb-apiKey" placeholder="AIzaSy...">
+    <label>Auth Domain</label>
+    <input type="text" id="fb-authDomain" placeholder="mein-projekt.firebaseapp.com">
+    <label>Database URL</label>
+    <input type="text" id="fb-databaseURL" placeholder="https://mein-projekt-default-rtdb.firebaseio.com">
+    <label>Project ID</label>
+    <input type="text" id="fb-projectId" placeholder="mein-projekt">
+    <button class="btn" onclick="saveFirebaseConfig()" style="margin-top:12px;">✓ VERBINDUNG SPEICHERN</button>
+    <div id="fb-status" style="margin-top:10px;font-size:12px;color:var(--muted);">Nicht verbunden.</div>
+    <div class="note">
+      Zugangsdaten: Firebase Console → ⚙️ Projekteinstellungen → Deine Apps → <code>firebaseConfig</code><br>
+      <a href="https://console.firebase.google.com" target="_blank">→ Firebase Console öffnen</a>
+    </div>
+  </div>
+
+  <div class="ibox">
+    <div class="it">📋 Firebase einrichten (5 Schritte)</div>
+    <div style="font-size:12px;color:var(--muted);line-height:2.2;">
+      <strong style="color:var(--text);">1.</strong> <a href="https://console.firebase.google.com" target="_blank" style="color:#3CB4F0;">console.firebase.google.com</a> → Projekt erstellen<br>
+      <strong style="color:var(--text);">2.</strong> „Realtime Database" → „Datenbank erstellen" → europe-west1 → Testmodus<br>
+      <strong style="color:var(--text);">3.</strong> ⚙️ Projekteinstellungen → „Deine Apps" → &lt;/&gt; Web-App hinzufügen<br>
+      <strong style="color:var(--text);">4.</strong> Die 4 Werte aus <code style="background:#111;padding:1px 5px;border-radius:3px;">firebaseConfig</code> oben eintragen<br>
+      <strong style="color:var(--text);">5.</strong> „Verbindung speichern" → grüner Punkt = aktiv ✓
+    </div>
+  </div>
+
+  <div class="ibox">
+    <div class="it">🗂 Lokale Daten verwalten</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Lokale Daten sind nur in diesem Browser gespeichert.</div>
+    <button class="btn sec" onclick="exportLocal()" style="margin-bottom:8px;">📤 Lokale Daten als JSON exportieren</button>
+    <button class="btn danger" onclick="clearLocal()">🗑 Alle lokalen Daten löschen</button>
+  </div>
+</div>
+
+<!-- INFO -->
+<div class="view" id="view-info">
+  <div class="div"></div>
+  <div class="stitle">Sendetermine & Tänze</div>
+  <div class="ibox">
+    <div class="it">Staffel 19 – 2026</div>
+    <table class="show-table">
+      <thead><tr><th>Datum</th><th>Folge</th><th>Tänze</th><th>Besonderheit</th></tr></thead>
+      <tbody>
+        <tr><td>27. Feb.</td><td>Kennenlernshow</td><td><span class="badge t0">—</span></td><td style="color:var(--muted);font-size:11px;">keine Wertung</td></tr>
+        <tr><td>6. März</td><td>Show 1</td><td><span class="badge t1">1</span></td><td style="color:var(--muted);font-size:11px;">Erste Entscheidung</td></tr>
+        <tr><td>13. März</td><td>Show 2</td><td><span class="badge t1">1</span></td><td></td></tr>
+        <tr><td>20. März</td><td>Show 3</td><td><span class="badge t1">1</span></td><td></td></tr>
+        <tr><td style="color:#be8050;">27. März</td><td style="color:var(--muted);">— Pause —</td><td></td><td style="color:var(--muted);font-size:11px;">DFB-Testspiel</td></tr>
+        <tr><td>29. März</td><td>Show 4 (So.)</td><td><span class="badge t1">1</span></td><td style="color:var(--muted);font-size:11px;">Sonntag!</td></tr>
+        <tr><td>3. April</td><td>Show 5</td><td><span class="badge t1">1</span></td><td></td></tr>
+        <tr><td>10. April</td><td>Show 6</td><td><span class="badge tsp">2 ⚡</span></td><td style="color:var(--muted);font-size:11px;">Jury-Challenge</td></tr>
+        <tr><td>17. April</td><td>Show 7</td><td><span class="badge t1">1</span></td><td></td></tr>
+        <tr><td>24. April</td><td>Show 8</td><td><span class="badge tsp">2 🔄</span></td><td style="color:var(--muted);font-size:11px;">Partner-Switch</td></tr>
+        <tr><td>1. Mai</td><td>Show 9</td><td><span class="badge t2">2</span></td><td></td></tr>
+        <tr><td>8. Mai</td><td>Show 10 – VF</td><td><span class="badge t2">2</span></td><td style="color:var(--muted);font-size:11px;">Viertelfinale</td></tr>
+        <tr><td>15. Mai</td><td>Show 11 – HF</td><td><span class="badge t2">2</span></td><td style="color:var(--muted);font-size:11px;">Halbfinale</td></tr>
+        <tr><td>29. Mai</td><td>Show 12 – Finale</td><td><span class="badge t3">3</span></td><td style="color:var(--muted);font-size:11px;">Jurytanz+Liebling+Freestyle</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="stitle">Juroren</div>
+  <div class="ibox">
+    <div style="display:flex;flex-direction:column;gap:9px;font-size:13px;">
+      <div style="display:flex;align-items:center;gap:10px;"><div style="width:11px;height:11px;border-radius:50%;background:var(--cy);"></div><strong style="color:var(--cy);min-width:52px;">Chris</strong><span style="color:var(--muted);">Deine persönliche Wertung (1–10)</span></div>
+      <div style="display:flex;align-items:center;gap:10px;"><div style="width:11px;height:11px;border-radius:50%;background:var(--cl);"></div><strong style="color:var(--cl);min-width:52px;">Llambi</strong><span style="color:var(--muted);">Joachim Llambi</span></div>
+      <div style="display:flex;align-items:center;gap:10px;"><div style="width:11px;height:11px;border-radius:50%;background:var(--cm);"></div><strong style="color:var(--cm);min-width:52px;">Motsi</strong><span style="color:var(--muted);">Motsi Mabuse</span></div>
+      <div style="display:flex;align-items:center;gap:10px;"><div style="width:11px;height:11px;border-radius:50%;background:var(--cj);"></div><strong style="color:var(--cj);min-width:52px;">Jorge</strong><span style="color:var(--muted);">Jorge González</span></div>
+    </div>
+  </div>
+  <div class="stitle">Alle 14 Paare</div>
+  <div class="ibox" id="all-pairs"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-database.js";
+
+const LS_SESSIONS = 'ld26_local_v1';
+const LS_MODE     = 'ld26_mode';
+const LS_FB_CFG   = 'ld26_fb_config';
+
+const PAIRS = [
+  { promi:"Esther Schweins",        profi:"Massimo Sinató",     desc:"Schauspielerin" },
+  { promi:"Vanessa 'Nessi' Borck",  profi:"Victoria Sauerwald", desc:"Content Creatorin" },
+  { promi:"Anna-Carina Woitschack", profi:"Evgeny Vinokurov",   desc:"Schlagersängerin" },
+  { promi:"Sonya Kraus",            profi:"Valentin Lusin",     desc:"Moderatorin" },
+  { promi:"Betty Taube",            profi:"Alexandru Ionel",    desc:"Model & Influencerin" },
+  { promi:"Nadja Benaissa",         profi:"Vadim Garbuzov",     desc:"Sängerin (No Angels)" },
+  { promi:"Bianca Heinicke",        profi:"Zsolt Sándor Cseke", desc:"YouTuberin (BibisBeautyPalace)" },
+  { promi:"Jan Kittmann",           profi:"Kathrin Menzinger",  desc:"Schauspieler (GZSZ)" },
+  { promi:"Gustav Schäfer",         profi:"Anastasia Maruster", desc:"Drummer (Tokio Hotel)" },
+  { promi:"Simon Gosejohann",       profi:"Ekaterina Leonova",  desc:"Comedian" },
+  { promi:"Joel Mattli",            profi:"Malika Dzumaev",     desc:"Ninja Warrior" },
+  { promi:"Willi Banner",           profi:"Patricija Ionel",    desc:"Influencer (Willi Whey)" },
+  { promi:"Milano",                 profi:"Marta Arndt",        desc:"Sänger" },
+  { promi:"Ross Antony",            profi:"Mariia Maksina",     desc:"Sänger & Entertainer" },
+];
+const JURY = [
+  {key:"you",label:"Chris",cls:"you"},
+  {key:"llambi",label:"Llambi",cls:"llambi"},
+  {key:"motsi",label:"Motsi",cls:"motsi"},
+  {key:"jorge",label:"Jorge",cls:"jorge"},
+];
+const SHOW_INFO = {
+  "Kennenlernshow":          {dances:0,hint:"Keine Bewertung – Gruppentänze, kein Ausscheiden",warn:true},
+  "Show 1":                  {dances:1,hint:"1 Tanz pro Paar · Erste Entscheidung"},
+  "Show 2":                  {dances:1,hint:"1 Tanz pro Paar"},
+  "Show 3":                  {dances:1,hint:"1 Tanz pro Paar"},
+  "Show 4":                  {dances:1,hint:"1 Tanz pro Paar · Ausnahme: Sonntag 29. März"},
+  "Show 5":                  {dances:1,hint:"1 Tanz pro Paar"},
+  "Show 6 – Jury-Challenge": {dances:2,hint:"Erwartet: 2 Tänze – Paartanz + Jury-Challenge",warn:true},
+  "Show 7":                  {dances:1,hint:"1 Tanz pro Paar"},
+  "Show 8 – Partner Switch": {dances:2,hint:"Erwartet: 2 Tänze – Originalpaar + Partner-Switch",warn:true},
+  "Show 9":                  {dances:2,hint:"2 Tänze pro Paar"},
+  "Show 10 – Viertelfinale": {dances:2,hint:"2 Tänze pro Paar · Viertelfinale"},
+  "Show 11 – Halbfinale":    {dances:2,hint:"2 Tänze pro Paar · Halbfinale"},
+  "Show 12 – Finale":        {dances:3,hint:"3 Tänze: Jurytanz + Lieblingstanz + Freestyle"},
+};
+
+let db = null;
+let cloudSessions = {};
+let mode = localStorage.getItem(LS_MODE) || 'local';
+let cur = null;
+
+// --- LOKAL ---
+function getLocalSessions() {
+  try { return JSON.parse(localStorage.getItem(LS_SESSIONS) || '{}'); } catch { return {}; }
+}
+function setLocalSession(s) {
+  const all = getLocalSessions(); all[s.id] = s;
+  localStorage.setItem(LS_SESSIONS, JSON.stringify(all));
+}
+function deleteLocalSession(id) {
+  const all = getLocalSessions(); delete all[id];
+  localStorage.setItem(LS_SESSIONS, JSON.stringify(all));
+}
+
+// --- FIREBASE ---
+function loadFbConfig() {
+  try { return JSON.parse(localStorage.getItem(LS_FB_CFG) || 'null'); } catch { return null; }
+}
+function initFirebase(config) {
+  try {
+    setSyncDot('loading');
+    const existing = getApps().find(a => a.name === 'ld26');
+    const app = existing || initializeApp(config, 'ld26');
+    db = getDatabase(app);
+    onValue(ref(db, 'sessions'), snap => {
+      cloudSessions = snap.val() || {};
+      setSyncDot(mode === 'local' ? 'local' : 'ok');
+      setFbStatus('✅ Verbunden – Live-Synchronisation aktiv.');
+      updateStats();
+      if (document.getElementById('view-history').classList.contains('active')) renderHistory();
+    }, err => {
+      setSyncDot('err'); setFbStatus('❌ Fehler: ' + err.message);
+    });
+  } catch(e) {
+    setSyncDot('err'); setFbStatus('❌ Konfigurationsfehler: ' + e.message);
+  }
+}
+function setSyncDot(s) { document.getElementById('sync-dot').className = s; }
+function setFbStatus(m) { const el=document.getElementById('fb-status'); if(el) el.innerHTML=m; }
+
+// --- MODUS ---
+window.setMode = function(m) {
+  mode = m;
+  localStorage.setItem(LS_MODE, m);
+  document.querySelectorAll('.mbtn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mb-'+m).classList.add('active');
+  setSyncDot(m==='local' ? 'local' : db ? 'ok' : 'err');
+  updateStats();
+  const msg = {local:'📱 Speichert lokal auf dem Gerät',cloud:'☁️ Speichert in Firebase',both:'🔄 Speichert lokal + Firebase'};
+  showToast(msg[m]);
+};
+
+window.saveFirebaseConfig = function() {
+  const config = {
+    apiKey:      document.getElementById('fb-apiKey').value.trim(),
+    authDomain:  document.getElementById('fb-authDomain').value.trim(),
+    databaseURL: document.getElementById('fb-databaseURL').value.trim(),
+    projectId:   document.getElementById('fb-projectId').value.trim(),
+  };
+  if (!config.apiKey || !config.databaseURL) { showToast('Bitte API Key und Database URL eintragen!','err'); return; }
+  localStorage.setItem(LS_FB_CFG, JSON.stringify(config));
+  initFirebase(config);
+  showToast('Firebase-Konfiguration gespeichert!');
+};
+
+// --- INIT ---
+function init() {
+  buildCBs(); buildAllPairs();
+  document.querySelectorAll('.mbtn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mb-'+mode)?.classList.add('active');
+  const cfg = loadFbConfig();
+  if (cfg) {
+    document.getElementById('fb-apiKey').value      = cfg.apiKey      || '';
+    document.getElementById('fb-authDomain').value  = cfg.authDomain  || '';
+    document.getElementById('fb-databaseURL').value = cfg.databaseURL || '';
+    document.getElementById('fb-projectId').value   = cfg.projectId   || '';
+    initFirebase(cfg);
+  } else {
+    setSyncDot(mode === 'local' ? 'local' : 'err');
+    setFbStatus('⚠️ Keine Firebase-Konfiguration. Zugangsdaten oben eintragen.');
+  }
+  updateStats();
+}
+
+function updateStats() {
+  document.getElementById('stat-local').textContent = Object.keys(getLocalSessions()).length;
+  document.getElementById('stat-cloud').textContent = db ? Object.keys(cloudSessions).length : '–';
+}
+
+function buildCBs() {
+  document.getElementById('pair-cbs').innerHTML = PAIRS.map((p,i) => `
+    <label class="pci">
+      <input type="checkbox" data-idx="${i}" checked>
+      <div><div class="pcn">${p.promi}</div>
+      <div class="pcp">${p.profi} <span style="color:var(--muted);font-weight:400">· ${p.desc}</span></div></div>
+    </label>`).join('');
+}
+function buildAllPairs() {
+  document.getElementById('all-pairs').innerHTML =
+    '<div class="it">Promi ↔ Profitänzer/in</div>' +
+    PAIRS.map(p => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border);">
+      <div><span style="font-size:13px;font-weight:700;">${p.promi}</span>
+      <span style="font-size:10px;color:var(--muted);margin-left:5px;">${p.desc}</span></div>
+      <span style="font-size:11px;color:var(--gold);font-weight:700;white-space:nowrap;margin-left:8px;">${p.profi}</span>
+    </div>`).join('');
+}
+
+// --- TABS ---
+window.showTab = function(name, btn) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tb').forEach(b => b.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (name === 'history') renderHistory();
+  if (name === 'storage') updateStats();
+};
+
+// --- SHOW AUSWAHL ---
+window.onShowChange = function() {
+  const val = document.getElementById('show-round').value;
+  if (!val) { document.getElementById('dance-hint-box').innerHTML=''; return; }
+  const [label, dances, date] = val.split('|');
+  const n = parseInt(dances);
+  document.getElementById('num-dances').value = String(n > 0 ? n : 1);
+  const info = SHOW_INFO[label] || {};
+  const hb = document.getElementById('dance-hint-box');
+  if (n === 0) {
+    hb.innerHTML = `<div class="dance-hint warn">⚠️ ${info.hint||'Keine regulären Wertungen'}</div>`;
+  } else if (info.hint) {
+    hb.innerHTML = `<div class="dance-hint${info.warn?' warn':''}">${info.warn?'⚡':'✓'} ${info.hint}</div>`;
+  } else { hb.innerHTML=''; }
+};
+
+// --- WERTUNG ---
+window.startRating = function() {
+  const sel = document.getElementById('show-round');
+  if (!sel.value) { alert('Bitte eine Folge auswählen!'); return; }
+  const [label,,date] = sel.value.split('|');
+  const n = parseInt(document.getElementById('num-dances').value);
+  const checked = [...document.querySelectorAll('#pair-cbs input:checked')];
+  if (!checked.length) { alert('Bitte mind. ein Paar wählen!'); return; }
+  const sel2 = checked.map(cb => PAIRS[+cb.dataset.idx]);
+  cur = {
+    id: Date.now(), date, round: label, numDances: n,
+    pairs: sel2.map(p => ({
+      promi:p.promi, profi:p.profi,
+      dances: Array.from({length:n}, () => ({name:'', scores:{you:0,llambi:0,motsi:0,jorge:0}}))
+    }))
+  };
+  document.getElementById('setup').style.display='none';
+  document.getElementById('rating').style.display='block';
+  const df = new Date(date).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+  document.getElementById('sbar').innerHTML = `<strong>${label}</strong> · ${df} · ${sel2.length} Paare · ${n} Tanz${n>1?'tänze':''}`;
+  renderCards();
+};
+
+function renderCards() {
+  document.getElementById('pairs-con').innerHTML = cur.pairs.map((p,pi) => `
+    <div class="pblock" id="pb-${pi}">
+      <div class="pbh">
+        <div><div class="pbn">${p.promi}</div><div class="pbp">↳ ${p.profi}</div></div>
+        <div style="font-family:'Bebas Neue',cursive;font-size:26px;color:var(--gold);letter-spacing:1px;" id="jt-${pi}">–</div>
+      </div>
+      <div class="dtabs">
+        ${p.dances.map((d,di) => `<button class="dtab ${di===0?'active':''}" onclick="switchD(${pi},${di})">Tanz ${di+1}</button>`).join('')}
+      </div>
+      ${p.dances.map((d,di) => `
+        <div class="dpanel ${di===0?'active':''}" id="dp-${pi}-${di}">
+          <div class="field" style="margin-bottom:14px;">
+            <label>Tanzstil (optional)</label>
+            <input type="text" placeholder="z. B. Cha-Cha-Cha, Wiener Walzer…" oninput="cur.pairs[${pi}].dances[${di}].name=this.value">
+          </div>
+          ${JURY.map(j => `
+            <div class="rrow">
+              <div class="rlbl ${j.cls}">${j.label}</div>
+              <div class="sbtns" id="sb-${pi}-${di}-${j.key}">
+                ${[1,2,3,4,5,6,7,8,9,10].map(v =>
+                  `<button class="sb" data-v="${v}" onclick="setS(${pi},${di},'${j.key}',${v})">${v}</button>`).join('')}
+              </div>
+            </div>`).join('')}
+        </div>`).join('')}
+      <div class="pfooter">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;">Jury-Summe</div>
+          <div id="jts-${pi}" style="font-family:'Bebas Neue',cursive;font-size:22px;color:var(--gold);">–</div>
+        </div>
+        <div class="spills" id="spl-${pi}"></div>
+      </div>
+    </div>`).join('');
+}
+
+window.switchD = function(pi,di) {
+  const b = document.getElementById(`pb-${pi}`);
+  b.querySelectorAll('.dtab').forEach((t,i) => t.classList.toggle('active',i===di));
+  b.querySelectorAll('.dpanel').forEach((p,i) => p.classList.toggle('active',i===di));
+};
+
+window.setS = function(pi,di,juror,val) {
+  cur.pairs[pi].dances[di].scores[juror] = val;
+  document.querySelectorAll(`#sb-${pi}-${di}-${juror} .sb`).forEach(b => {
+    const v = +b.dataset.v;
+    const cls = juror==='you'?'ay':juror==='llambi'?'al':juror==='motsi'?'am':'aj';
+    b.className = 'sb'+(v===val?' '+cls:'');
+  });
+  refreshUI(pi);
+};
+
+function refreshUI(pi) {
+  const p = cur.pairs[pi];
+  const t = {you:0,llambi:0,motsi:0,jorge:0};
+  p.dances.forEach(d => JURY.forEach(j => { t[j.key] += d.scores[j.key]; }));
+  const js = t.llambi+t.motsi+t.jorge;
+  document.getElementById(`jts-${pi}`).textContent = js>0 ? js+' Pkt.' : '–';
+  document.getElementById(`spl-${pi}`).innerHTML = JURY.map(j =>
+    t[j.key]>0 ? `<span class="spill ${j.cls}">${j.label}: ${t[j.key]}</span>` : '').join('');
+}
+
+// --- SPEICHERN ---
+window.saveSession = async function() {
+  const needsCloud = mode === 'cloud' || mode === 'both';
+  const needsLocal  = mode === 'local'  || mode === 'both';
+  if (needsCloud && !db) {
+    showToast('❌ Firebase nicht verbunden! Im Tab 💾 Speicher einrichten.','err'); return;
+  }
+  setSyncDot('loading');
+  const done = [];
+  if (needsLocal) { setLocalSession(cur); done.push('📱 Lokal'); }
+  if (needsCloud) {
+    try { await set(ref(db, `sessions/${cur.id}`), cur); done.push('☁️ Firebase'); }
+    catch(e) { setSyncDot('err'); showToast('❌ Firebase: '+e.message,'err'); return; }
+  }
+  setSyncDot(mode==='local'?'local':'ok');
+  updateStats();
+  showToast('Gespeichert: '+done.join(' + ')+' ✓');
+  backToSetup();
+};
+
+window.backToSetup = function() {
+  document.getElementById('setup').style.display='block';
+  document.getElementById('rating').style.display='none';
+  cur = null;
+};
+
+// --- VERLAUF ---
+function renderHistory() {
+  const el = document.getElementById('history-list');
+  const local = getLocalSessions();
+  const merged = {};
+
+  if (mode === 'local' || mode === 'both')
+    Object.values(local).forEach(s => { merged[s.id] = {...s, _src:'local'}; });
+  if ((mode === 'cloud' || mode === 'both') && db)
+    Object.values(cloudSessions).forEach(s => { merged[s.id] = {...s, _src: merged[s.id] ? 'both' : 'cloud'}; });
+
+  const list = Object.values(merged).sort((a,b) => b.id - a.id);
+  if (!list.length) {
+    const hint = (!db && mode !== 'local') ? 'Zuerst Firebase einrichten (Tab 💾 Speicher).' : 'Starte eine neue Wertung!';
+    el.innerHTML = `<div class="empty"><div class="ei">🎭</div><p>Noch keine Wertungen gespeichert.<br>${hint}</p></div>`;
+    return;
+  }
+  el.innerHTML = list.map(s => {
+    const df = new Date(s.date).toLocaleDateString('de-DE',{day:'2-digit',month:'long',year:'numeric'});
+    const srcLabel = s._src==='both'
+      ? '<span class="hsrc local">📱</span><span class="hsrc cloud">☁️</span>'
+      : s._src==='cloud' ? '<span class="hsrc cloud">☁️</span>'
+      : '<span class="hsrc local">📱</span>';
+    return `
+    <div class="hcard">
+      <div class="hch" onclick="togH('${s.id}')">
+        <div>
+          <div class="hrnd">${s.round} ${srcLabel}</div>
+          <div class="hmeta">${df} · ${s.pairs.length} Paare · ${s.numDances} Tanz/Tänze</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="delb" onclick="delS(event,'${s.id}','${s._src}')">🗑</button>
+          <span class="htog" id="htog-${s.id}">▼</span>
+        </div>
+      </div>
+      <div class="hbody" id="hb-${s.id}">
+        ${s.pairs.map(p => {
+          const jt = p.dances.reduce((a,d)=>a+d.scores.llambi+d.scores.motsi+d.scores.jorge,0);
+          return `
+          <div class="hpair">
+            <div class="hpn">${p.promi} <span class="hpp">· ${p.profi}</span>
+              ${jt>0?`<span style="float:right;font-family:'Bebas Neue',cursive;font-size:16px;color:var(--gold);">${jt} Pkt.</span>`:''}</div>
+            ${p.dances.map((d,di) => `
+              <div class="hdance">
+                <span>Tanz ${di+1}${d.name?' – '+d.name:''}</span>
+                <div class="hds">
+                  <span class="hy">Chris: ${d.scores.you||'–'}</span>
+                  <span class="hl">L: ${d.scores.llambi||'–'}</span>
+                  <span class="hm">M: ${d.scores.motsi||'–'}</span>
+                  <span class="hj">J: ${d.scores.jorge||'–'}</span>
+                </div>
+              </div>`).join('')}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.togH = function(id) {
+  document.getElementById(`hb-${id}`)?.classList.toggle('open');
+  document.getElementById(`htog-${id}`)?.classList.toggle('open');
+};
+
+window.delS = async function(e, id, src) {
+  e.stopPropagation();
+  if (!confirm('Wertung löschen?')) return;
+  if (src === 'local' || src === 'both') deleteLocalSession(id);
+  if ((src === 'cloud' || src === 'both') && db) {
+    try { await remove(ref(db, `sessions/${id}`)); } catch(e) { showToast('Cloud-Löschen fehlgeschlagen','err'); }
+  }
+  updateStats(); renderHistory();
+  showToast('Gelöscht ✓');
+};
+
+// --- EXPORT / CLEAR ---
+window.exportLocal = function() {
+  const data = JSON.stringify(Object.values(getLocalSessions()), null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `letsdance2026_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('📤 Export gestartet!');
+};
+
+window.clearLocal = function() {
+  if (!confirm('Alle lokalen Daten unwiderruflich löschen?')) return;
+  localStorage.removeItem(LS_SESSIONS);
+  updateStats();
+  if (document.getElementById('view-history').classList.contains('active')) renderHistory();
+  showToast('Lokale Daten gelöscht','warn');
+};
+
+// --- TOAST ---
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast'+(type?' '+type:'');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+init();
+</script>
+</body>
+</html>
