@@ -237,6 +237,21 @@
   .toast.show{transform:translateX(-50%) translateY(0);}
   .toast.err{background:var(--red);color:#fff;}
   .toast.info{background:#1a3050;color:#fff;border:1px solid var(--blue);}
+
+  /* MULTI-USER */
+  .multi-user-sel{margin-bottom:14px;}
+  .mu-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:8px;}
+  .mu-list{display:flex;flex-direction:column;gap:6px;}
+  .mu-item{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .15s;}
+  .mu-item.sel{border-color:var(--pink);}
+  .mu-item input[type=checkbox]{width:16px;height:16px;accent-color:var(--pink);flex-shrink:0;}
+  .mu-item .mu-av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:#000;flex-shrink:0;}
+  .mu-item .mu-name{font-size:13px;font-weight:600;flex:1;}
+  .mu-item .mu-tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px;background:#1a0a12;color:var(--muted);border:1px solid var(--border);}
+  .mu-item .mu-tag.jury{background:#0a1a00;color:var(--green);border-color:var(--green);}
+  .jury-owner-box{background:#0a1a00;border:1px solid var(--green);border-radius:8px;padding:10px 13px;font-size:12px;color:var(--green);margin-bottom:10px;display:flex;gap:8px;align-items:center;}
+  .user-score-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:6px 0;border-bottom:1px solid var(--border);}
+  .user-score-row:last-child{border-bottom:none;}
   ::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 </style>
 </head>
@@ -328,6 +343,10 @@
     <div class="field">
       <label>👥 Paare in dieser Show</label>
       <div class="plist" id="pair-cbs"></div>
+    </div>
+    <div class="field" id="mitspieler-field" style="display:none;">
+      <label>👥 Wer bewertet heute mit? <span style="color:var(--muted);font-weight:400;">(dieses Gerät)</span></label>
+      <div class="mu-list" id="mitspieler-list"></div>
     </div>
     <button class="btn" onclick="startRating()">▶ WERTUNG STARTEN</button>
   </div>
@@ -437,9 +456,10 @@
 window._ld_queue = {};
 ['openUserModal','closeUserModal','addUser','selectUser','deleteUser',
  'setMode','saveFirebaseConfig','showTab','onShowChange','startRating',
- 'switchD','setS','saveSession','backToSetup','showDanceResult',
+ 'switchD','setUS','setJS','saveSession','backToSetup','showDanceResult',
  'closeDanceResult','showShowSummary','closeShowSummary',
- 'setLbView','renderLeaderboard','togH','exportLocal','clearLocal'
+ 'setLbView','renderLeaderboard','togH','exportLocal','clearLocal',
+ 'onMitspielerChange'
 ].forEach(fn => {
   window[fn] = function(...a) {
     if (window._ld_fns && window._ld_fns[fn]) return window._ld_fns[fn](...a);
@@ -496,7 +516,7 @@ const USER_COLORS = ['#E8007D','#FFE000','#2ECC71','#3CB4F0','#C06EE8','#FF8C00'
 // ═══════════════════════════════════════════
 // STORAGE KEYS
 // ═══════════════════════════════════════════
-const LS_SESSIONS = 'ld26_sessions_v3';
+const LS_SESSIONS = 'ld26_sessions_v4';
 const LS_MODE     = 'ld26_mode';
 const LS_FB_CFG   = 'ld26_fb_config';
 const LS_USERS    = 'ld26_users';
@@ -507,8 +527,10 @@ const LS_CUR_USER = 'ld26_current_user';
 // ═══════════════════════════════════════════
 let db = null;
 let cloudSessions = {};
+let cloudJuryMeta = {}; // { [round]: { owner: userName, jury: {llambi,motsi,jorge} per dance per pair } }
 let mode = localStorage.getItem(LS_MODE) || 'local';
-let cur = null;
+let cur = null;       // aktive Session (ein Gerät, ggf. mehrere Nutzer)
+let curUsers = [];    // aktive Nutzer in dieser Wertungsrunde
 let lbView = 'total';
 
 // ═══════════════════════════════════════════
@@ -593,12 +615,32 @@ function initFirebase(config) {
     const app = existing || initializeApp(config,'ld26');
     db = getDatabase(app);
     onValue(ref(db,'sessions'), snap => {
+      const prev = JSON.stringify(cloudSessions);
       cloudSessions = snap.val()||{};
       setSyncDot(mode==='local'?'local':'ok');
       setFbStatus('✅ Verbunden.');
       if (document.getElementById('view-history').classList.contains('active')) renderHistory();
       if (document.getElementById('view-leaderboard').classList.contains('active')) renderLeaderboard();
+      // Echtzeit: prüfe ob neue Tänze eingefroren wurden
+      if (prev !== '{}' && prev !== JSON.stringify(cloudSessions)) {
+        checkForNewlyFrozen(JSON.parse(prev), cloudSessions);
+      }
     }, err => { setSyncDot('err'); setFbStatus('❌ '+err.message); });
+    // Listen for jury meta changes (owner claims, jury scores)
+    onValue(ref(db,'juryMeta'), snap => {
+      const raw = snap.val()||{};
+      // map back underscore keys to original round names
+      const all = getAllSessions();
+      const rounds = [...new Set(Object.values(all).map(s=>s.round))];
+      cloudJuryMeta = {};
+      Object.entries(raw).forEach(([k,v]) => {
+        // find matching round
+        const match = rounds.find(r => r.replace(/[.#$\/\[\]]/g,'_') === k) || k;
+        cloudJuryMeta[match] = v;
+      });
+      // If we're on the rating screen, update jury owner display
+      if (cur) refreshJuryOwnerDisplay();
+    }, ()=>{});
   } catch(e) { setSyncDot('err'); setFbStatus('❌ '+e.message); }
 }
 function setSyncDot(s) { document.getElementById('sync-dot').className = s; }
@@ -678,7 +720,7 @@ window.showTab = function(name, btn) {
 
 window.onShowChange = function() {
   const val = document.getElementById('show-round').value;
-  if (!val) { document.getElementById('dance-hint-box').innerHTML=''; return; }
+  if (!val) { document.getElementById('dance-hint-box').innerHTML=''; document.getElementById('mitspieler-field').style.display='none'; return; }
   const [label, dances] = val.split('|');
   const n = parseInt(dances);
   document.getElementById('num-dances').value = String(n>0?n:1);
@@ -687,6 +729,45 @@ window.onShowChange = function() {
   if (n===0) hb.innerHTML=`<div class="dance-hint warn">⚠️ ${info.hint||'Keine Wertung'}</div>`;
   else if (info.hint) hb.innerHTML=`<div class="dance-hint${info.warn?' warn':''}">${info.warn?'⚡':'✓'} ${info.hint}</div>`;
   else hb.innerHTML='';
+  // Show mitspieler selector if multiple users exist
+  const users = getUsers();
+  const mf = document.getElementById('mitspieler-field');
+  if (users.length > 1 && n > 0) {
+    mf.style.display = 'block';
+    renderMitspielerList(label);
+  } else {
+    mf.style.display = 'none';
+  }
+};
+
+function renderMitspielerList(round) {
+  const users = getUsers();
+  const curU = getCurrentUser();
+  const all = getAllSessions();
+  const meta = getJuryMeta(round);
+  const juryOwner = meta?.owner || null;
+  const el = document.getElementById('mitspieler-list');
+  el.innerHTML = users.map((u,i) => {
+    const color = USER_COLORS[i % USER_COLORS.length];
+    const isCur = u === curU;
+    const isJury = u === juryOwner;
+    const hasJury = !!meta?.owner;
+    const tag = isJury
+      ? '<span class="mu-tag jury">⚖️ Jury</span>'
+      : (!hasJury && isCur ? '<span class="mu-tag jury">⚖️ Jury (neu)</span>' : '<span class="mu-tag">kein Jury</span>');
+    return `<label class="mu-item ${isCur?'sel':''}">
+      <input type="checkbox" data-user="${u}" ${isCur?'checked':''} onchange="onMitspielerChange(this,'${round}')">
+      <div class="mu-av" style="background:${color};">${getInitials(u)}</div>
+      <div class="mu-name">${u}</div>
+      ${tag}
+    </label>`;
+  }).join('');
+}
+
+window.onMitspielerChange = function(cb, round) {
+  // ensure current user stays checked
+  const curU = getCurrentUser();
+  if (cb.dataset.user === curU && !cb.checked) { cb.checked = true; return; }
 };
 
 // ═══════════════════════════════════════════
@@ -720,31 +801,86 @@ function isShowFrozen(allSessions, round) {
   );
 }
 
+
+function checkForNewlyFrozen(prevSessions, newSessions) {
+  const allNow = { ...getLocalSessions(), ...newSessions };
+  const rounds = [...new Set(Object.values(allNow).map(s=>s.round))];
+  rounds.forEach(round => {
+    const s0 = Object.values(allNow).find(s=>s.round===round);
+    if (!s0) return;
+    s0.pairs?.forEach((pair, pi) => {
+      pair.dances?.forEach((_, di) => {
+        const wasFrozen = isTanzFrozen({...getLocalSessions(),...prevSessions}, round, pair.promi, di);
+        const nowFrozen = isTanzFrozen(allNow, round, pair.promi, di);
+        if (!wasFrozen && nowFrozen) {
+          showToast(`🔒 ${pair.promi} – Tanz ${di+1} eingefroren!`, 'info');
+          setTimeout(() => showDanceResult(round, pair.promi, di), 600);
+          if (isShowFrozen(allNow, round)) {
+            setTimeout(() => showShowSummary(round), 1400);
+          }
+        }
+      });
+    });
+  });
+}
+
+function refreshJuryOwnerDisplay() {
+  if (!cur) return;
+  const meta = getJuryMeta(cur.round);
+  const juryOwner = meta?.owner;
+  const isJuryOwner = juryOwner === cur.userName || !juryOwner;
+  // Update jury rows visibility in active rating cards
+  cur.pairs.forEach((p, pi) => {
+    p.dances.forEach((d, di) => {
+      const juryBlock = document.getElementById(`jury-block-${pi}-${di}`);
+      const juryInfo  = document.getElementById(`jury-info-${pi}-${di}`);
+      if (!juryBlock || !juryInfo) return;
+      if (isJuryOwner) {
+        juryBlock.style.display = 'block';
+        juryInfo.style.display  = 'none';
+      } else {
+        juryBlock.style.display = 'none';
+        juryInfo.style.display  = 'block';
+        juryInfo.innerHTML = `<div class="jury-owner-box">⚖️ Jury wird eingegeben von <strong style="margin-left:4px;">${juryOwner}</strong></div>`;
+      }
+    });
+  });
+}
+
 // ═══════════════════════════════════════════
 // JURY MEHRHEITSENTSCHEID
 // ═══════════════════════════════════════════
-function calcOfficialJuror(allSessions, round, pairPromi, danceIdx, juror) {
-  const votes = [];
-  Object.values(allSessions).forEach(s => {
-    if (s.round !== round) return;
+// Returns jury scores for a dance: from juryMeta (single owner), fallback to any session
+function getOfficialJuryScores(round, pairPromi, danceIdx) {
+  // 1. Try juryMeta (single authoritative source)
+  const metaScores = getJuryScores(round, pairPromi, danceIdx);
+  if (metaScores?.llambi && metaScores?.motsi && metaScores?.jorge) return metaScores;
+  // 2. Fallback: find any session with jury values for this dance (legacy / single-device)
+  const all = getAllSessions();
+  for (const s of Object.values(all)) {
+    if (s.round !== round) continue;
     const pair = s.pairs?.find(p => p.promi === pairPromi);
-    if (!pair) return;
-    const val = pair.dances?.[danceIdx]?.scores?.[juror];
-    if (val && val > 0) votes.push(val);
-  });
-  if (!votes.length) return null;
-  const freq = {};
-  let maxF = 0, modus = votes[0];
-  votes.forEach(v => { freq[v]=(freq[v]||0)+1; if(freq[v]>maxF){maxF=freq[v];modus=v;} });
-  return { modus, votes, consensus: maxF/votes.length, totalVotes: votes.length };
+    const d = pair?.dances?.[danceIdx];
+    if (d?.scores?.llambi && d?.scores?.motsi && d?.scores?.jorge) {
+      return { llambi: d.scores.llambi, motsi: d.scores.motsi, jorge: d.scores.jorge };
+    }
+  }
+  return null;
+}
+
+// Backward-compat wrapper used by result popups
+function calcOfficialJuror(allSessions, round, pairPromi, danceIdx, juror) {
+  const scores = getOfficialJuryScores(round, pairPromi, danceIdx);
+  if (!scores) return null;
+  const val = scores[juror];
+  if (!val) return null;
+  return { modus: val, votes: [val], consensus: 1, totalVotes: 1 };
 }
 
 function calcJuryAvg(allSessions, round, pairPromi, danceIdx) {
-  const l = calcOfficialJuror(allSessions, round, pairPromi, danceIdx, 'llambi');
-  const m = calcOfficialJuror(allSessions, round, pairPromi, danceIdx, 'motsi');
-  const j = calcOfficialJuror(allSessions, round, pairPromi, danceIdx, 'jorge');
-  if (!l||!m||!j) return null;
-  return (l.modus + m.modus + j.modus) / 3;
+  const scores = getOfficialJuryScores(round, pairPromi, danceIdx);
+  if (!scores?.llambi || !scores?.motsi || !scores?.jorge) return null;
+  return (scores.llambi + scores.motsi + scores.jorge) / 3;
 }
 
 // ═══════════════════════════════════════════
@@ -819,7 +955,7 @@ function calcStreak(allSessions, userName) {
 // ═══════════════════════════════════════════
 // WERTUNG STARTEN
 // ═══════════════════════════════════════════
-window.startRating = function() {
+window.startRating = async function() {
   const userName = getCurrentUser();
   if (!userName) { openUserModal(); showToast('Bitte zuerst Nutzer wählen!','err'); return; }
   const sel = document.getElementById('show-round');
@@ -829,51 +965,75 @@ window.startRating = function() {
   const checked = [...document.querySelectorAll('#pair-cbs input:checked')];
   if (!checked.length) { alert('Bitte mind. ein Paar wählen!'); return; }
 
+  // Determine which users are rating on this device
+  const muChecked = [...document.querySelectorAll('#mitspieler-list input:checked')];
+  curUsers = muChecked.length > 0
+    ? muChecked.map(cb => cb.dataset.user)
+    : [userName];
+  // Always include current user
+  if (!curUsers.includes(userName)) curUsers.unshift(userName);
+
   const all = getAllSessions();
 
-  // Prüfe ob Nutzer diese Show bereits bewertet hat
-  const existing = Object.values(all).find(s => s.round===label && s.userName===userName);
-  if (existing) {
-    if (!confirm(`Du hast ${label} bereits bewertet. Möchtest du deine Wertung überschreiben?\n\n⚠️ Nicht möglich für Tänze die bereits eingefroren sind.`)) return;
-  }
+  // Claim jury ownership if nobody has yet
+  const juryOwner = await claimJuryOwner(label, userName);
+  const isJuryOwner = juryOwner === userName;
 
-  cur = {
-    id: existing ? existing.id : Date.now(),
-    date, round: label, numDances: n,
-    userName,
-    pairs: checked.map(cb => PAIRS[+cb.dataset.idx]).map(p => ({
-      promi: p.promi, profi: p.profi,
-      dances: Array.from({length:n}, () => ({name:'', scores:{you:0,llambi:0,motsi:0,jorge:0}}))
-    }))
-  };
+  // Build cur using first user as primary (others get split on save)
+  const pairs = checked.map(cb => PAIRS[+cb.dataset.idx]).map(p => ({
+    promi: p.promi, profi: p.profi,
+    dances: Array.from({length:n}, () => ({name:'', scores:{}}))
+  }));
 
-  // Prefill existing scores if overwriting
-  if (existing) {
-    cur.pairs.forEach((pair, pi) => {
-      const exPair = existing.pairs?.find(p=>p.promi===pair.promi);
-      if (exPair) {
-        pair.dances.forEach((d, di) => {
-          if (exPair.dances?.[di]) d.scores = {...exPair.dances[di].scores};
-          if (exPair.dances?.[di]?.name) d.name = exPair.dances[di].name;
-        });
-      }
-    });
-  }
+  // cur holds scores for ALL curUsers: cur.userScores[userName][pi][di] = value
+  cur = { date, round: label, numDances: n, pairs, juryOwner, isJuryOwner };
+  cur.userScores = {};
+  curUsers.forEach(u => {
+    cur.userScores[u] = pairs.map((p,pi) =>
+      p.dances.map((_, di) => {
+        // Prefill from existing session
+        const ex = Object.values(all).find(s => s.round===label && s.userName===u);
+        const exD = ex?.pairs?.find(pp=>pp.promi===p.promi)?.dances?.[di];
+        return exD?.scores?.you || 0;
+      })
+    );
+  });
+  // Jury scores (shared, from juryMeta or existing session)
+  cur.juryScores = pairs.map((p,pi) =>
+    p.dances.map((_,di) => {
+      const meta = getJuryScores(label, p.promi, di);
+      if (meta) return { llambi: meta.llambi||0, motsi: meta.motsi||0, jorge: meta.jorge||0 };
+      // fallback from existing session of juryOwner
+      const ex = Object.values(all).find(s => s.round===label && s.userName===juryOwner);
+      const exD = ex?.pairs?.find(pp=>pp.promi===p.promi)?.dances?.[di];
+      return { llambi: exD?.scores?.llambi||0, motsi: exD?.scores?.motsi||0, jorge: exD?.scores?.jorge||0 };
+    })
+  );
+  // Dance names
+  cur.danceNames = pairs.map((p,pi) =>
+    p.dances.map((_,di) => {
+      const ex = Object.values(all).find(s => s.round===label);
+      return ex?.pairs?.find(pp=>pp.promi===p.promi)?.dances?.[di]?.name || '';
+    })
+  );
 
   document.getElementById('setup').style.display = 'none';
   document.getElementById('rating').style.display = 'block';
-  const color = getUserColor(userName);
-  const df = new Date(date).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
-  document.getElementById('sbar').innerHTML =
-    `<strong>${label}</strong> · ${df} · ${cur.pairs.length} Paare · <span style="color:${color};font-weight:700;">👤 ${userName}</span>`;
 
-  // Warnung wenn nur 1 Nutzer
+  // Build sbar
+  const userPills = curUsers.map(u => {
+    const col = getUserColor(u);
+    return `<span style="color:${col};font-weight:700;">👤 ${u}</span>`;
+  }).join(' · ');
+  const df = new Date(date).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+  document.getElementById('sbar').innerHTML = `<strong>${label}</strong> · ${df} · ${cur.pairs.length} Paare · ${userPills}`;
+
   const warnArea = document.getElementById('warn-area');
-  if (getUsers().length < 2) {
-    warnArea.innerHTML = `<div class="warn-box">⚠️ <div>Nur 1 Nutzer registriert. Das Scoring wird erst aktiv sobald ein zweiter Nutzer dieselbe Show bewertet.</div></div>`;
-  } else {
-    warnArea.innerHTML = '';
-  }
+  const warnings = [];
+  if (getUsers().length < 2) warnings.push('Nur 1 Nutzer registriert. Scoring aktiv ab 2 Nutzern.');
+  if (!isJuryOwner) warnings.push(`⚖️ Jury wird von <strong>${juryOwner}</strong> eingegeben – du gibst nur deine persönliche Wertung ein.`);
+  else if (curUsers.length === 1) warnings.push(`⚖️ Du bist Jury-Verantwortlich für ${label}.`);
+  warnArea.innerHTML = warnings.map(w => `<div class="warn-box" style="${w.startsWith('⚖️')?'border-color:var(--green);color:var(--green);background:#0a1a00;':''}">⚠️ <div>${w}</div></div>`).join('');
 
   renderCards(all);
 };
@@ -883,8 +1043,7 @@ window.startRating = function() {
 // ═══════════════════════════════════════════
 function renderCards(allSessions) {
   const all = allSessions || getAllSessions();
-  const userName = cur.userName;
-  const userColor = getUserColor(userName);
+  const isJuryOwner = cur.isJuryOwner;
 
   document.getElementById('pairs-con').innerHTML = cur.pairs.map((p, pi) => {
     return `
@@ -897,50 +1056,61 @@ function renderCards(allSessions) {
         ${p.dances.map((d,di) => {
           const frozen = isTanzFrozen(all, cur.round, p.promi, di);
           return `<button class="dtab ${di===0?'active':''} ${frozen?'frozen-tab':''}" onclick="switchD(${pi},${di})">
-            ${frozen?'🔒 ':''}Tanz ${di+1}
+            ${frozen?'🔒 ':''}${cur.danceNames[pi][di]||('Tanz '+(di+1))}
           </button>`;
         }).join('')}
       </div>
       ${p.dances.map((d, di) => {
         const frozen = isTanzFrozen(all, cur.round, p.promi, di);
         const dis = frozen ? 'disabled' : '';
+        const js = cur.juryScores[pi][di];
         return `
         <div class="dpanel ${di===0?'active':''}" id="dp-${pi}-${di}">
-          ${frozen ? `<div style="padding:10px 14px;"><div class="warn-box" style="border-color:var(--green);color:var(--green);background:var(--frozen);">🔒 <div>Dieser Tanz ist eingefroren – alle Nutzer haben bewertet. Keine Änderung mehr möglich.<br><button class="result-btn" onclick="showDanceResult('${cur.round}','${p.promi}',${di})">🏆 Auswertung anzeigen</button></div></div></div>` : ''}
-          <div class="field" style="padding:${frozen?'0':'14px'} 16px 0;${frozen?'display:none':''}">
-            <label>Tanzstil (optional)</label>
-            <input type="text" placeholder="z. B. Cha-Cha-Cha…" value="${d.name||''}" ${dis} oninput="cur.pairs[${pi}].dances[${di}].name=this.value">
-          </div>
+          ${frozen ? `<div style="padding:10px 14px;"><div class="warn-box" style="border-color:var(--green);color:var(--green);background:var(--frozen);">🔒 <div>Eingefroren – alle haben bewertet.<br><button class="result-btn" onclick="showDanceResult('${cur.round}','${p.promi}',${di})">🏆 Auswertung</button></div></div></div>` : ''}
           <div style="padding:12px 16px;${frozen?'display:none':''}">
-            <div class="rrow">
-              <div class="rlbl" style="color:${userColor};">${userName}</div>
-              <div class="sbtns" id="sb-${pi}-${di}-you">
-                ${[1,2,3,4,5,6,7,8,9,10].map(v=>
-                  `<button class="sb ${d.scores.you===v?'ay':''}" data-v="${v}" ${dis} onclick="setS(${pi},${di},'you',${v})">${v}</button>`).join('')}
-              </div>
+            <div class="field" style="margin-bottom:10px;">
+              <label>Tanzstil (optional)</label>
+              <input type="text" placeholder="z. B. Cha-Cha-Cha…" value="${cur.danceNames[pi][di]||''}" ${dis}
+                oninput="cur.danceNames[${pi}][${di}]=this.value;document.querySelectorAll('#dtabs-${pi} .dtab')[${di}].textContent=this.value||'Tanz ${di+1}'">
             </div>
-            <div style="height:1px;background:var(--border);margin:10px 0;"></div>
-            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Jury-Einschätzung</div>
-            <div class="rrow">
-              <div class="rlbl llambi">Llambi</div>
-              <div class="sbtns" id="sb-${pi}-${di}-llambi">
-                ${[1,2,3,4,5,6,7,8,9,10].map(v=>
-                  `<button class="sb ${d.scores.llambi===v?'al':''}" data-v="${v}" ${dis} onclick="setS(${pi},${di},'llambi',${v})">${v}</button>`).join('')}
+            <!-- USER SCORE ROWS -->
+            ${curUsers.map(u => {
+              const col = getUserColor(u);
+              const val = cur.userScores[u]?.[pi]?.[di] || 0;
+              return `<div class="user-score-row">
+                <div class="rlbl" style="color:${col};min-width:70px;">${u}</div>
+                <div class="sbtns" id="sb-${pi}-${di}-${u.replace(/\s/g,'_')}">
+                  ${[1,2,3,4,5,6,7,8,9,10].map(v =>
+                    `<button class="sb ${val===v?'ay':''}" data-v="${v}" ${dis}
+                      style="${val===v?'background:'+col+';border-color:'+col+';color:#000;':''}"
+                      onclick="setUS(${pi},${di},'${u.replace(/'/g,"\'")}',${v})">${v}</button>`
+                  ).join('')}
+                </div>
+              </div>`;
+            }).join('')}
+            <!-- JURY SECTION -->
+            <div id="jury-block-${pi}-${di}" style="${isJuryOwner?'':'display:none'}">
+              <div style="height:1px;background:var(--border);margin:10px 0;"></div>
+              <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">
+                ⚖️ Jury-Einschätzung <span style="color:var(--green);font-size:9px;">(du bist Verantwortlich)</span>
               </div>
+              ${['llambi','motsi','jorge'].map(j => {
+                const clsMap = {llambi:'al',motsi:'am',jorge:'aj'};
+                const colMap = {llambi:'var(--pink)',motsi:'var(--purple)',jorge:'var(--blue)'};
+                const jval = js[j]||0;
+                return `<div class="rrow">
+                  <div class="rlbl ${j}">${j.charAt(0).toUpperCase()+j.slice(1)}</div>
+                  <div class="sbtns" id="sb-${pi}-${di}-${j}">
+                    ${[1,2,3,4,5,6,7,8,9,10].map(v =>
+                      `<button class="sb ${jval===v?clsMap[j]:''}" data-v="${v}" ${dis}
+                        onclick="setJS(${pi},${di},'${j}',${v})">${v}</button>`
+                    ).join('')}
+                  </div>
+                </div>`;
+              }).join('')}
             </div>
-            <div class="rrow">
-              <div class="rlbl motsi">Motsi</div>
-              <div class="sbtns" id="sb-${pi}-${di}-motsi">
-                ${[1,2,3,4,5,6,7,8,9,10].map(v=>
-                  `<button class="sb ${d.scores.motsi===v?'am':''}" data-v="${v}" ${dis} onclick="setS(${pi},${di},'motsi',${v})">${v}</button>`).join('')}
-              </div>
-            </div>
-            <div class="rrow">
-              <div class="rlbl jorge">Jorge</div>
-              <div class="sbtns" id="sb-${pi}-${di}-jorge">
-                ${[1,2,3,4,5,6,7,8,9,10].map(v=>
-                  `<button class="sb ${d.scores.jorge===v?'aj':''}" data-v="${v}" ${dis} onclick="setS(${pi},${di},'jorge',${v})">${v}</button>`).join('')}
-              </div>
+            <div id="jury-info-${pi}-${di}" style="${isJuryOwner?'display:none':''}">
+              <div class="jury-owner-box">⚖️ Jury wird eingegeben von <strong style="margin-left:4px;">${cur.juryOwner}</strong></div>
             </div>
           </div>
         </div>`;
@@ -955,7 +1125,6 @@ function renderCards(allSessions) {
     </div>`;
   }).join('');
 
-  // Init footer display
   cur.pairs.forEach((_, pi) => refreshFooter(pi));
 }
 
@@ -965,41 +1134,80 @@ window.switchD = function(pi,di) {
   b.querySelectorAll('.dpanel').forEach((p,i)=>p.classList.toggle('active',i===di));
 };
 
-window.setS = function(pi,di,juror,val) {
-  cur.pairs[pi].dances[di].scores[juror] = val;
-  const clsMap = {you:'ay',llambi:'al',motsi:'am',jorge:'aj'};
+window.setUS = function(pi, di, userName, val) {
+  if (!cur.userScores[userName]) cur.userScores[userName] = [];
+  if (!cur.userScores[userName][pi]) cur.userScores[userName][pi] = [];
+  cur.userScores[userName][pi][di] = val;
+  const col = getUserColor(userName);
+  const safeU = userName.replace(/[^a-zA-Z0-9]/g, '_');
+  document.querySelectorAll(`#sb-${pi}-${di}-${safeU} .sb`).forEach(b => {
+    const active = +b.dataset.v === val;
+    b.className = 'sb' + (active ? ' ay' : '');
+    b.style.background = active ? col : '';
+    b.style.borderColor = active ? col : '';
+    b.style.color = active ? '#000' : '';
+  });
+  refreshFooter(pi);
+};
+
+window.setJS = function(pi, di, juror, val) {
+  if (!cur.juryScores[pi]) cur.juryScores[pi] = [];
+  if (!cur.juryScores[pi][di]) cur.juryScores[pi][di] = {llambi:0,motsi:0,jorge:0};
+  cur.juryScores[pi][di][juror] = val;
+  const clsMap = {llambi:'al',motsi:'am',jorge:'aj'};
   document.querySelectorAll(`#sb-${pi}-${di}-${juror} .sb`).forEach(b => {
-    b.className = 'sb'+(+b.dataset.v===val?' '+clsMap[juror]:'');
+    b.className = 'sb' + (+b.dataset.v===val ? ' '+clsMap[juror] : '');
   });
   refreshFooter(pi);
 };
 
 function refreshFooter(pi) {
-  const p = cur.pairs[pi];
-  const t = {llambi:0,motsi:0,jorge:0};
-  p.dances.forEach(d => { t.llambi+=d.scores.llambi; t.motsi+=d.scores.motsi; t.jorge+=d.scores.jorge; });
-  const js = t.llambi+t.motsi+t.jorge;
-  document.getElementById(`jt-foot-${pi}`).textContent = js>0 ? js+' Pkt.' : '–';
-  const yourTotal = p.dances.reduce((a,d)=>a+d.scores.you,0);
-  const color = getUserColor(cur.userName);
-  document.getElementById(`spl-${pi}`).innerHTML =
-    (yourTotal>0?`<span class="spill" style="color:${color};border-color:${color};">${cur.userName}: ${yourTotal}</span>`:'') +
-    ['llambi','motsi','jorge'].map(j=>t[j]>0?`<span class="spill ${j}">${j.charAt(0).toUpperCase()+j.slice(1)}: ${t[j]}</span>`:'').join('');
+  // Jury total
+  let juryTotal = 0;
+  cur.pairs[pi].dances.forEach((_, di) => {
+    const js = cur.juryScores?.[pi]?.[di];
+    if (js) juryTotal += (js.llambi||0) + (js.motsi||0) + (js.jorge||0);
+  });
+  const jEl = document.getElementById(`jt-foot-${pi}`);
+  if (jEl) jEl.textContent = juryTotal > 0 ? juryTotal + ' Pkt.' : '–';
+  // User score pills
+  const spill = document.getElementById(`spl-${pi}`);
+  if (!spill) return;
+  let pillsHtml = '';
+  curUsers.forEach(u => {
+    const total = (cur.userScores[u]?.[pi]||[]).reduce((a,v)=>a+(v||0), 0);
+    if (total > 0) {
+      const col = getUserColor(u);
+      pillsHtml += `<span class="spill" style="color:${col};border-color:${col};">${u}: ${total}</span>`;
+    }
+  });
+  if (cur.isJuryOwner) {
+    const jl = cur.juryScores?.[pi]?.reduce((a,js) => a+(js?.llambi||0), 0)||0;
+    const jm = cur.juryScores?.[pi]?.reduce((a,js) => a+(js?.motsi||0), 0)||0;
+    const jj = cur.juryScores?.[pi]?.reduce((a,js) => a+(js?.jorge||0), 0)||0;
+    if (jl) pillsHtml += `<span class="spill llambi">Llambi: ${jl}</span>`;
+    if (jm) pillsHtml += `<span class="spill motsi">Motsi: ${jm}</span>`;
+    if (jj) pillsHtml += `<span class="spill jorge">Jorge: ${jj}</span>`;
+  }
+  spill.innerHTML = pillsHtml;
 }
 
 // ═══════════════════════════════════════════
 // SPEICHERN
 // ═══════════════════════════════════════════
 window.saveSession = async function() {
-  // Warnung bei fehlenden Jury-Werten
-  let missingJury = false;
-  cur.pairs.forEach(p => {
-    p.dances.forEach(d => {
-      if (!d.scores.llambi || !d.scores.motsi || !d.scores.jorge) missingJury = true;
+  // Validate: warn if any jury field empty (only if jury owner)
+  if (cur.isJuryOwner) {
+    let missingJury = false;
+    cur.pairs.forEach((p,pi) => {
+      p.dances.forEach((_,di) => {
+        const js = cur.juryScores?.[pi]?.[di];
+        if (!js?.llambi || !js?.motsi || !js?.jorge) missingJury = true;
+      });
     });
-  });
-  if (missingJury) {
-    if (!confirm('⚠️ Einige Jury-Felder (Llambi/Motsi/Jorge) sind noch leer. Diese Tänze zählen nicht im Mehrheitsentscheid.\n\nTrotzdem speichern?')) return;
+    if (missingJury) {
+      if (!confirm('⚠️ Einige Jury-Felder sind noch leer.\nDiese Tänze können nicht eingefroren werden bis Jury vollständig.\n\nTrotzdem speichern?')) return;
+    }
   }
 
   const needsCloud = mode==='cloud'||mode==='both';
@@ -1007,38 +1215,76 @@ window.saveSession = async function() {
   if (needsCloud && !db) { showToast('Firebase nicht verbunden!','err'); return; }
 
   setSyncDot('loading');
-  if (needsLocal) saveLocalSession(cur);
-  if (needsCloud) {
-    try { await set(ref(db,`sessions/${cur.id}`), cur); }
-    catch(e) { setSyncDot('err'); showToast('Firebase-Fehler: '+e.message,'err'); return; }
+
+  // Save jury scores to juryMeta if we are owner
+  if (cur.isJuryOwner) {
+    for (let pi=0; pi < cur.pairs.length; pi++) {
+      for (let di=0; di < cur.pairs[pi].dances.length; di++) {
+        const js = cur.juryScores?.[pi]?.[di];
+        if (js?.llambi && js?.motsi && js?.jorge) {
+          await saveJuryScores(cur.round, cur.pairs[pi].promi, di, js);
+        }
+      }
+    }
   }
+
+  // Build and save one session per user
+  const now = Date.now();
+  const savedSessions = [];
+  const all = getAllSessions();
+
+  for (const u of curUsers) {
+    const existing = Object.values(all).find(s => s.round===cur.round && s.userName===u);
+    const sessionId = existing ? existing.id : now + curUsers.indexOf(u);
+
+    const session = {
+      id: sessionId,
+      date: cur.date,
+      round: cur.round,
+      numDances: cur.numDances,
+      userName: u,
+      pairs: cur.pairs.map((p, pi) => ({
+        promi: p.promi,
+        profi: p.profi,
+        dances: p.dances.map((_, di) => ({
+          name: cur.danceNames[pi][di] || '',
+          scores: {
+            you: cur.userScores[u]?.[pi]?.[di] || 0,
+            // Jury scores only on jury owner's session (for legacy fallback)
+            llambi: u === cur.juryOwner ? (cur.juryScores?.[pi]?.[di]?.llambi||0) : 0,
+            motsi:  u === cur.juryOwner ? (cur.juryScores?.[pi]?.[di]?.motsi||0)  : 0,
+            jorge:  u === cur.juryOwner ? (cur.juryScores?.[pi]?.[di]?.jorge||0)  : 0,
+          }
+        }))
+      }))
+    };
+
+    if (needsLocal) saveLocalSession(session);
+    if (needsCloud) {
+      try { await set(ref(db, `sessions/${sessionId}`), session); }
+      catch(e) { setSyncDot('err'); showToast('Firebase-Fehler: '+e.message,'err'); return; }
+    }
+    savedSessions.push(session);
+  }
+
   setSyncDot(mode==='local'?'local':'ok');
+  const msg = curUsers.length > 1
+    ? `✓ ${curUsers.length} Wertungen gespeichert`
+    : '✓ Gespeichert';
+  if (getUsers().length < 2) showToast(msg + ' – Scoring aktiv ab 2 Nutzern', 'info');
+  else showToast(msg);
 
-  // Warnung wenn nur 1 Nutzer
-  if (getUsers().length < 2) {
-    showToast('✓ Gespeichert – Scoring aktiv sobald 2. Nutzer bewertet','info');
-  } else {
-    showToast('✓ Gespeichert');
-  }
-
-  // Prüfe nach dem Speichern ob Tänze eingefroren werden
+  // Check for newly frozen dances
   const allAfter = getAllSessions();
   let anyFrozen = false;
-  let allShowFrozen = true;
-
   cur.pairs.forEach((pair, pi) => {
-    pair.dances.forEach((dance, di) => {
-      const frozen = isTanzFrozen(allAfter, cur.round, pair.promi, di);
-      if (frozen) {
+    pair.dances.forEach((_, di) => {
+      if (isTanzFrozen(allAfter, cur.round, pair.promi, di)) {
         anyFrozen = true;
         setTimeout(() => showDanceResult(cur.round, pair.promi, di), 500 + pi*200 + di*100);
-      } else {
-        allShowFrozen = false;
       }
     });
   });
-
-  // Prüfe ob gesamte Show eingefroren
   if (anyFrozen && isShowFrozen(allAfter, cur.round)) {
     setTimeout(() => showShowSummary(cur.round), 1200);
   }
@@ -1296,6 +1542,58 @@ function getAllSessions() {
   return { ...getLocalSessions(), ...cloudSessions };
 }
 
+// ═══════════════════════════════════════════
+// JURY META – wer ist Jury-Verantwortlicher
+// ═══════════════════════════════════════════
+function getLocalJuryMeta() {
+  try { return JSON.parse(localStorage.getItem('ld26_jury_meta')||'{}'); } catch { return {}; }
+}
+function saveLocalJuryMeta(meta) {
+  localStorage.setItem('ld26_jury_meta', JSON.stringify(meta));
+}
+function getJuryMeta(round) {
+  // merge local + cloud
+  const local = getLocalJuryMeta();
+  return cloudJuryMeta[round] || local[round] || null;
+}
+async function claimJuryOwner(round, userName) {
+  const meta = getJuryMeta(round);
+  if (meta?.owner) return meta.owner; // already claimed
+  const newMeta = { owner: userName, juryScores: {} };
+  // save locally
+  const local = getLocalJuryMeta();
+  local[round] = newMeta;
+  saveLocalJuryMeta(local);
+  // save to firebase if connected
+  if (db && (mode==='cloud'||mode==='both')) {
+    try { await set(ref(db, `juryMeta/${round.replace(/[.#$/\[\]]/g,'_')}`), newMeta); } catch(e) {}
+  }
+  return userName;
+}
+async function saveJuryScores(round, pairPromi, danceIdx, scores) {
+  const key = `${pairPromi}_${danceIdx}`.replace(/[^a-zA-Z0-9_]/g,'_');
+  // local
+  const local = getLocalJuryMeta();
+  if (!local[round]) local[round] = { owner: getCurrentUser(), juryScores: {} };
+  if (!local[round].juryScores) local[round].juryScores = {};
+  local[round].juryScores[key] = scores;
+  saveLocalJuryMeta(local);
+  // firebase
+  if (db && (mode==='cloud'||mode==='both')) {
+    try {
+      const rKey = round.replace(/[.#$/\[\]]/g,'_');
+      await set(ref(db, `juryMeta/${rKey}/juryScores/${key}`), scores);
+    } catch(e) {}
+  }
+}
+function getJuryScores(round, pairPromi, danceIdx) {
+  const key = `${pairPromi}_${danceIdx}`.replace(/[^a-zA-Z0-9_]/g,'_');
+  const meta = getJuryMeta(round);
+  return meta?.juryScores?.[key] || null;
+}
+
+
+
 function renderHistory() {
   const el = document.getElementById('history-list');
   const all = getAllSessions();
@@ -1481,9 +1779,10 @@ function showToast(msg, type) {
 window._ld_register({
   openUserModal, closeUserModal, addUser, selectUser, deleteUser,
   setMode, saveFirebaseConfig, showTab, onShowChange, startRating,
-  switchD, setS, saveSession, backToSetup, showDanceResult,
+  switchD, setUS, setJS, saveSession, backToSetup, showDanceResult,
   closeDanceResult, showShowSummary, closeShowSummary,
-  setLbView, renderLeaderboard, togH, exportLocal, clearLocal
+  setLbView, renderLeaderboard, togH, exportLocal, clearLocal,
+  onMitspielerChange
 });
 
 init();
