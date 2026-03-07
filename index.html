@@ -327,7 +327,7 @@
         <option value="Show 9|2|2026-05-01">Show 9 – 1. Mai 2026</option>
         <option value="Show 10 – Viertelfinale|2|2026-05-08">Show 10 – 8. Mai 2026 (Viertelfinale)</option>
         <option value="Show 11 – Halbfinale|2|2026-05-15">Show 11 – 15. Mai 2026 (Halbfinale)</option>
-        <option value="Show 12 – Finale|3|2026-05-22">Show 12 – 29. Mai 2026 (Finale)</option>
+        <option value="Show 12 – Finale|3|2026-05-29">Show 12 – 29. Mai 2026 (Finale)</option>
       </select>
     </div>
     <div id="dance-hint-box"></div>
@@ -386,7 +386,7 @@
     <div class="it">📐 Scoring-Formel</div>
     <div style="font-size:12px;color:var(--muted);line-height:1.9;">
       Pro Tanz: <strong style="color:var(--text);">Punkte = max(0, 10 − Abweichung × 2)</strong><br>
-      Abweichung = |Deine Wertung − Jury-Ø (Mehrheitsentscheid)|<br>
+      Abweichung = |Deine Wertung − Jury-Ø (Jury-Verantwortlicher)|<br>
       <span style="color:var(--yellow);">Perfekt = 10 Pkt. · 5 daneben = 0 Pkt.</span><br>
       <span style="color:var(--muted);font-size:11px;">Nur eingefrorene Tänze zählen ins Scoring.</span>
     </div>
@@ -532,6 +532,7 @@ let mode = localStorage.getItem(LS_MODE) || 'local';
 let cur = null;       // aktive Session (ein Gerät, ggf. mehrere Nutzer)
 let curUsers = [];    // aktive Nutzer in dieser Wertungsrunde
 let lbView = 'total';
+const shownPopups = new Set(); // dedup guard: prevents double-showing freeze popups
 
 // ═══════════════════════════════════════════
 // NUTZER
@@ -542,9 +543,18 @@ function getUsers() {
 function saveUsers(u) { localStorage.setItem(LS_USERS, JSON.stringify(u)); }
 function getCurrentUser() { return localStorage.getItem(LS_CUR_USER) || ''; }
 function setCurrentUser(n) { localStorage.setItem(LS_CUR_USER, n); }
+function getUserColorMap() {
+  try { return JSON.parse(localStorage.getItem('ld26_user_colors')||'{}'); } catch { return {}; }
+}
 function getUserColor(name) {
-  const idx = getUsers().indexOf(name);
-  return USER_COLORS[Math.max(0,idx) % USER_COLORS.length];
+  const map = getUserColorMap();
+  if (map[name]) return map[name];
+  // Assign a stable color on first access: pick first unused color
+  const used = new Set(Object.values(map));
+  const color = USER_COLORS.find(c => !used.has(c)) || USER_COLORS[Object.keys(map).length % USER_COLORS.length];
+  map[name] = color;
+  localStorage.setItem('ld26_user_colors', JSON.stringify(map));
+  return color;
 }
 function getInitials(name) {
   return (name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
@@ -557,14 +567,25 @@ function updateHeaderUser() {
   document.getElementById('header-uname').textContent = name || 'Nutzer wählen';
 }
 window.openUserModal = function() { renderUserList(); document.getElementById('user-modal').classList.add('open'); };
-window.closeUserModal = function() { document.getElementById('user-modal').classList.remove('open'); };
+window.closeUserModal = function() {
+  document.getElementById('user-modal').classList.remove('open');
+  // Refresh mitspieler list in case users changed
+  const sel = document.getElementById('show-round');
+  if (sel && sel.value) {
+    const [label,,] = sel.value.split('|');
+    const users = getUsers();
+    const mf = document.getElementById('mitspieler-field');
+    if (users.length > 1) { mf.style.display='block'; renderMitspielerList(label); }
+    else mf.style.display='none';
+  }
+};
 function renderUserList() {
   const users = getUsers(), curU = getCurrentUser();
   const el = document.getElementById('user-list');
   if (!users.length) { el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:12px;font-size:13px;">Noch keine Nutzer. Füge deinen Namen unten hinzu.</div>'; return; }
   el.innerHTML = users.map((u,i) => `
     <div class="user-item ${u===curU?'sel':''}" onclick="selectUser('${u}')">
-      <div class="av" style="background:${USER_COLORS[i%USER_COLORS.length]};">${getInitials(u)}</div>
+      <div class="av" style="background:${getUserColor(u)};">${getInitials(u)}</div>
       <div><div class="un">${u}</div><div class="ud">${u===curU?'✓ Aktiv':''}</div></div>
       <button class="del-u" onclick="deleteUser(event,'${u}')">✕</button>
     </div>`).join('');
@@ -590,6 +611,10 @@ window.deleteUser = function(e, name) {
   const users = getUsers().filter(u=>u!==name);
   saveUsers(users);
   if (getCurrentUser()===name) setCurrentUser(users[0]||'');
+  // Free up the color so it can be reused
+  const colorMap = getUserColorMap();
+  delete colorMap[name];
+  localStorage.setItem('ld26_user_colors', JSON.stringify(colorMap));
   updateHeaderUser(); renderUserList();
 };
 
@@ -743,20 +768,29 @@ window.onShowChange = function() {
 function renderMitspielerList(round) {
   const users = getUsers();
   const curU = getCurrentUser();
-  const all = getAllSessions();
   const meta = getJuryMeta(round);
   const juryOwner = meta?.owner || null;
   const el = document.getElementById('mitspieler-list');
+
+  // Preserve currently checked state before re-render
+  const prevChecked = new Set(
+    [...el.querySelectorAll('input:checked')].map(cb => cb.dataset.user)
+  );
+  // Current user is always checked
+  prevChecked.add(curU);
+
   el.innerHTML = users.map((u,i) => {
-    const color = USER_COLORS[i % USER_COLORS.length];
+    const color = getUserColor(u);
+    const isChecked = prevChecked.has(u);
     const isCur = u === curU;
     const isJury = u === juryOwner;
     const hasJury = !!meta?.owner;
     const tag = isJury
       ? '<span class="mu-tag jury">⚖️ Jury</span>'
       : (!hasJury && isCur ? '<span class="mu-tag jury">⚖️ Jury (neu)</span>' : '<span class="mu-tag">kein Jury</span>');
-    return `<label class="mu-item ${isCur?'sel':''}">
-      <input type="checkbox" data-user="${u}" ${isCur?'checked':''} onchange="onMitspielerChange(this,'${round}')">
+    return `<label class="mu-item ${isChecked?'sel':''}">
+      <input type="checkbox" data-user="${u}" ${isChecked?'checked':''}
+        onchange="onMitspielerChange(this,'${round}')">
       <div class="mu-av" style="background:${color};">${getInitials(u)}</div>
       <div class="mu-name">${u}</div>
       ${tag}
@@ -765,9 +799,11 @@ function renderMitspielerList(round) {
 }
 
 window.onMitspielerChange = function(cb, round) {
-  // ensure current user stays checked
   const curU = getCurrentUser();
+  // Current user cannot be unchecked
   if (cb.dataset.user === curU && !cb.checked) { cb.checked = true; return; }
+  // Toggle .sel class on parent label
+  cb.closest('.mu-item')?.classList.toggle('sel', cb.checked);
 };
 
 // ═══════════════════════════════════════════
@@ -778,26 +814,28 @@ window.onMitspielerChange = function(cb, round) {
 function isTanzFrozen(allSessions, round, pairPromi, danceIdx) {
   const users = getUsers();
   if (users.length < 2) return false; // mind. 2 Nutzer nötig
+  // A dance is frozen when ALL users have submitted their personal score (scores.you > 0)
   return users.every(u =>
     Object.values(allSessions).some(s =>
       s.round === round &&
       s.userName === u &&
       s.pairs?.some(p =>
         p.promi === pairPromi &&
-        (p.dances?.[danceIdx]?.scores?.you > 0 ||
-         p.dances?.[danceIdx]?.scores?.llambi > 0)
+        p.dances?.[danceIdx]?.scores?.you > 0
       )
     )
   );
 }
 
 function isShowFrozen(allSessions, round) {
-  // Alle Paare und Tänze dieser Show eingefroren?
+  // Show is frozen when every dance of every pair is frozen
   const showSessions = Object.values(allSessions).filter(s => s.round === round);
   if (!showSessions.length) return false;
-  const s0 = showSessions[0];
-  return s0.pairs.every((p, pi) =>
-    s0.dances ? true : p.dances.every((_, di) => isTanzFrozen(allSessions, round, p.promi, di))
+  // Use the session with most pairs as reference
+  const s0 = showSessions.reduce((a,b) => (b.pairs?.length||0) > (a.pairs?.length||0) ? b : a);
+  if (!s0.pairs?.length) return false;
+  return s0.pairs.every(p =>
+    p.dances.every((_, di) => isTanzFrozen(allSessions, round, p.promi, di))
   );
 }
 
@@ -806,17 +844,23 @@ function checkForNewlyFrozen(prevSessions, newSessions) {
   const allNow = { ...getLocalSessions(), ...newSessions };
   const rounds = [...new Set(Object.values(allNow).map(s=>s.round))];
   rounds.forEach(round => {
-    const s0 = Object.values(allNow).find(s=>s.round===round);
-    if (!s0) return;
+    const roundSessions = Object.values(allNow).filter(s=>s.round===round);
+    if (!roundSessions.length) return;
+    const s0 = roundSessions.reduce((a,b) => (b.pairs?.length||0) > (a.pairs?.length||0) ? b : a);
     s0.pairs?.forEach((pair, pi) => {
       pair.dances?.forEach((_, di) => {
         const wasFrozen = isTanzFrozen({...getLocalSessions(),...prevSessions}, round, pair.promi, di);
         const nowFrozen = isTanzFrozen(allNow, round, pair.promi, di);
         if (!wasFrozen && nowFrozen) {
-          showToast(`🔒 ${pair.promi} – Tanz ${di+1} eingefroren!`, 'info');
-          setTimeout(() => showDanceResult(round, pair.promi, di), 600);
-          if (isShowFrozen(allNow, round)) {
-            setTimeout(() => showShowSummary(round), 1400);
+          const popupKey = `${round}__${pair.promi}__${di}`;
+          if (!shownPopups.has(popupKey)) {
+            shownPopups.add(popupKey);
+            setTimeout(() => shownPopups.delete(popupKey), 8000); // allow re-show after 8s
+            showToast(`🔒 ${pair.promi} – Tanz ${di+1} eingefroren!`, 'info');
+            setTimeout(() => showDanceResult(round, pair.promi, di), 600);
+            if (isShowFrozen(allNow, round)) {
+              setTimeout(() => showShowSummary(round), 1400);
+            }
           }
         }
       });
@@ -828,7 +872,7 @@ function refreshJuryOwnerDisplay() {
   if (!cur) return;
   const meta = getJuryMeta(cur.round);
   const juryOwner = meta?.owner;
-  const isJuryOwner = juryOwner === cur.userName || !juryOwner;
+  const isJuryOwner = juryOwner === getCurrentUser() || !juryOwner;
   // Update jury rows visibility in active rating cards
   cur.pairs.forEach((p, pi) => {
     p.dances.forEach((d, di) => {
@@ -902,7 +946,8 @@ function calcUserScoreForDance(allSessions, round, pairPromi, danceIdx, userName
 function calcUserScoreForShow(allSessions, round, userName) {
   const showSessions = Object.values(allSessions).filter(s=>s.round===round);
   if (!showSessions.length) return { pts: 0, dances: 0 };
-  const s0 = showSessions[0];
+  // Use session with most pairs as reference for iteration
+  const s0 = showSessions.reduce((a,b) => (b.pairs?.length||0) > (a.pairs?.length||0) ? b : a);
   let total = 0, count = 0;
   s0.pairs.forEach((pair, pi) => {
     pair.dances.forEach((_, di) => {
@@ -929,12 +974,18 @@ function calcUserTotalScore(allSessions, userName) {
 // Streak: wie viele Tänze in Folge war Nutzer am nächsten dran
 function calcStreak(allSessions, userName) {
   const users = getUsers();
-  const rounds = [...new Set(Object.values(allSessions).map(s=>s.round))];
+  // Sort rounds by date for correct streak calculation
+  const roundDates = {};
+  Object.values(allSessions).forEach(s => {
+    if (!roundDates[s.round] || s.date < roundDates[s.round]) roundDates[s.round] = s.date || '';
+  });
+  const rounds = Object.keys(roundDates).sort((a,b) => (roundDates[a]||'').localeCompare(roundDates[b]||''));
   let streak = 0, maxStreak = 0;
   rounds.forEach(round => {
     const showSessions = Object.values(allSessions).filter(s=>s.round===round);
     if (!showSessions.length) return;
-    showSessions[0].pairs.forEach((pair, pi) => {
+    const sRef = showSessions.reduce((a,b) => (b.pairs?.length||0) > (a.pairs?.length||0) ? b : a);
+    sRef.pairs.forEach((pair, pi) => {
       pair.dances.forEach((_, di) => {
         if (!isTanzFrozen(allSessions, round, pair.promi, di)) return;
         const avg = calcJuryAvg(allSessions, round, pair.promi, di);
@@ -964,6 +1015,15 @@ window.startRating = async function() {
   const n = parseInt(document.getElementById('num-dances').value);
   const checked = [...document.querySelectorAll('#pair-cbs input:checked')];
   if (!checked.length) { alert('Bitte mind. ein Paar wählen!'); return; }
+  if (n === 0) { alert('Die Kennenlernshow hat keine Wertungen – bitte eine andere Show wählen.'); return; }
+
+  // Ensure mitspieler list is rendered and up to date
+  const users = getUsers();
+  const mf = document.getElementById('mitspieler-field');
+  if (users.length > 1) {
+    mf.style.display = 'block';
+    renderMitspielerList(label);
+  }
 
   // Determine which users are rating on this device
   const muChecked = [...document.querySelectorAll('#mitspieler-list input:checked')];
@@ -1079,7 +1139,7 @@ function renderCards(allSessions) {
               const val = cur.userScores[u]?.[pi]?.[di] || 0;
               return `<div class="user-score-row">
                 <div class="rlbl" style="color:${col};min-width:70px;">${u}</div>
-                <div class="sbtns" id="sb-${pi}-${di}-${u.replace(/\s/g,'_')}">
+                <div class="sbtns" id="sb-${pi}-${di}-${u.replace(/[^a-zA-Z0-9]/g,'_')}">
                   ${[1,2,3,4,5,6,7,8,9,10].map(v =>
                     `<button class="sb ${val===v?'ay':''}" data-v="${v}" ${dis}
                       style="${val===v?'background:'+col+';border-color:'+col+';color:#000;':''}"
@@ -1139,7 +1199,7 @@ window.setUS = function(pi, di, userName, val) {
   if (!cur.userScores[userName][pi]) cur.userScores[userName][pi] = [];
   cur.userScores[userName][pi][di] = val;
   const col = getUserColor(userName);
-  const safeU = userName.replace(/[^a-zA-Z0-9]/g, '_');
+  const safeU = userName.replace(/[^a-zA-Z0-9]/g, '_'); // consistent with renderCards
   document.querySelectorAll(`#sb-${pi}-${di}-${safeU} .sb`).forEach(b => {
     const active = +b.dataset.v === val;
     b.className = 'sb' + (active ? ' ay' : '');
@@ -1228,14 +1288,19 @@ window.saveSession = async function() {
     }
   }
 
+  // Capture state BEFORE saving for freeze comparison
+  const allBeforeSave = getAllSessions();
+
   // Build and save one session per user
   const now = Date.now();
   const savedSessions = [];
-  const all = getAllSessions();
+  const all = allBeforeSave;
 
   for (const u of curUsers) {
     const existing = Object.values(all).find(s => s.round===cur.round && s.userName===u);
-    const sessionId = existing ? existing.id : now + curUsers.indexOf(u);
+    // Use a stable per-user ID: timestamp + hash of userName to avoid collisions
+    const userHash = Array.from(u).reduce((h,c) => (h*31 + c.charCodeAt(0)) & 0xfffff, 0);
+    const sessionId = existing ? existing.id : now * 100 + userHash % 100;
 
     const session = {
       id: sessionId,
@@ -1274,28 +1339,46 @@ window.saveSession = async function() {
   if (getUsers().length < 2) showToast(msg + ' – Scoring aktiv ab 2 Nutzern', 'info');
   else showToast(msg);
 
-  // Check for newly frozen dances
+  // Check for newly frozen dances (allBeforeSave captured before saving above)
   const allAfter = getAllSessions();
-  let anyFrozen = false;
-  cur.pairs.forEach((pair, pi) => {
-    pair.dances.forEach((_, di) => {
-      if (isTanzFrozen(allAfter, cur.round, pair.promi, di)) {
-        anyFrozen = true;
-        setTimeout(() => showDanceResult(cur.round, pair.promi, di), 500 + pi*200 + di*100);
-      }
-    });
-  });
-  if (anyFrozen && isShowFrozen(allAfter, cur.round)) {
-    setTimeout(() => showShowSummary(cur.round), 1200);
-  }
+  const newlyFrozen = [];
+  const savedRound = cur.round;
+  const savedPairs = cur.pairs.map(p => ({ promi: p.promi, numDances: p.dances.length }));
 
+  savedPairs.forEach((pair, pi) => {
+    for (let di = 0; di < pair.numDances; di++) {
+      const wasFrozen = isTanzFrozen(allBeforeSave, savedRound, pair.promi, di);
+      const nowFrozen = isTanzFrozen(allAfter, savedRound, pair.promi, di);
+      if (!wasFrozen && nowFrozen) newlyFrozen.push({ promi: pair.promi, di });
+    }
+  });
+
+  // backToSetup first (clears cur), then show popups with captured data
   backToSetup();
+
+  newlyFrozen.forEach(({ promi, di }, idx) => {
+    const popupKey = `${savedRound}__${promi}__${di}`;
+    if (!shownPopups.has(popupKey)) {
+      shownPopups.add(popupKey);
+      setTimeout(() => shownPopups.delete(popupKey), 8000);
+      setTimeout(() => showDanceResult(savedRound, promi, di), 500 + idx * 300);
+    }
+  });
+  if (newlyFrozen.length > 0 && isShowFrozen(allAfter, savedRound)) {
+    const showKey = `show__${savedRound}`;
+    if (!shownPopups.has(showKey)) {
+      shownPopups.add(showKey);
+      setTimeout(() => shownPopups.delete(showKey), 8000);
+      setTimeout(() => showShowSummary(savedRound), 500 + newlyFrozen.length * 300 + 400);
+    }
+  }
 };
 
 window.backToSetup = function() {
   document.getElementById('setup').style.display = 'block';
   document.getElementById('rating').style.display = 'none';
   cur = null;
+  curUsers = [];
 };
 
 // ═══════════════════════════════════════════
@@ -1305,10 +1388,14 @@ window.showDanceResult = function(round, pairPromi, danceIdx) {
   const all = getAllSessions();
   const users = getUsers();
 
-  // Pair info
-  const session = Object.values(all).find(s=>s.round===round);
-  if (!session) return;
-  const pair = session.pairs?.find(p=>p.promi===pairPromi);
+  // Pair info – search all sessions to find one that contains this pair
+  const roundSessions = Object.values(all).filter(s=>s.round===round);
+  if (!roundSessions.length) return;
+  let pair = null;
+  for (const s of roundSessions) {
+    pair = s.pairs?.find(p=>p.promi===pairPromi);
+    if (pair) break;
+  }
   if (!pair) return;
   const dance = pair.dances?.[danceIdx];
   const danceName = dance?.name || `Tanz ${danceIdx+1}`;
@@ -1332,39 +1419,35 @@ window.showDanceResult = function(round, pairPromi, danceIdx) {
   }).filter(u=>u.sc).sort((a,b)=>b.sc.pts-a.sc.pts);
 
   const best = userScores[0];
-  const juryAvgUsers = users.reduce((sum,u) => {
+  // Überraschungs-Indikator: vergleiche offizielle Jury mit dem Ø der persönlichen Nutzerwertungen
+  // (jeder Nutzer hat eine persönliche Einschätzung = scores.you, nicht die Jury)
+  const userVals = users.map(u => {
     const s = Object.values(all).find(s=>s.round===round&&s.userName===u);
-    const p2 = s?.pairs?.find(p=>p.promi===pairPromi);
-    const expected = p2?.dances?.[danceIdx];
-    if (!expected) return sum;
-    return sum + (expected.scores.llambi+expected.scores.motsi+expected.scores.jorge)/3;
-  }, 0) / users.length;
-
-  const surprise = Math.abs(avg - juryAvgUsers) >= 1.5;
-
-  const consClass = (c) => c>=1?'full':c>=0.6?'partial':'';
+    return s?.pairs?.find(p=>p.promi===pairPromi)?.dances?.[danceIdx]?.scores?.you || 0;
+  }).filter(v=>v>0);
+  const userAvg = userVals.length ? userVals.reduce((a,b)=>a+b,0)/userVals.length : null;
+  const juryAvgUsers = userAvg; // renamed for compat below
+  const surprise = userAvg !== null && Math.abs(avg - userAvg) >= 1.5;
 
   const html = `
     <h2>🔒 Tanz eingefroren</h2>
     <p>${pairPromi} · <strong>${danceName}</strong> · ${round}</p>
 
     <div class="result-section">
-      <div class="rs-title">⚖️ Offizielle Jury (Mehrheitsentscheid)</div>
+      ${(() => { const m = getJuryMeta(round); return m?.owner ? `<div style="font-size:11px;color:var(--green);margin-bottom:8px;">⚖️ Jury eingegeben von <strong>${m.owner}</strong></div>` : ''; })()}
+      <div class="rs-title">⚖️ Offizielle Jury</div>
       <div class="jury-consensus">
-        <div class="jc-pill ${consClass(l.consensus)}">
+        <div class="jc-pill full">
           <div class="jcp-name" style="color:var(--pink);">Llambi</div>
           <div class="jcp-val" style="color:var(--pink);">${l.modus}</div>
-          <div class="jcp-cons">${l.consensus===1?'✅ Alle einig':'⚠️ '+Math.round(l.consensus*100)+'%'}</div>
         </div>
-        <div class="jc-pill ${consClass(m.consensus)}">
+        <div class="jc-pill full">
           <div class="jcp-name" style="color:var(--purple);">Motsi</div>
           <div class="jcp-val" style="color:var(--purple);">${m.modus}</div>
-          <div class="jcp-cons">${m.consensus===1?'✅ Alle einig':'⚠️ '+Math.round(m.consensus*100)+'%'}</div>
         </div>
-        <div class="jc-pill ${consClass(j.consensus)}">
+        <div class="jc-pill full">
           <div class="jcp-name" style="color:var(--blue);">Jorge</div>
           <div class="jcp-val" style="color:var(--blue);">${j.modus}</div>
-          <div class="jcp-cons">${j.consensus===1?'✅ Alle einig':'⚠️ '+Math.round(j.consensus*100)+'%'}</div>
         </div>
         <div class="jc-pill" style="background:#1a1000;border-color:var(--yellow);">
           <div class="jcp-name" style="color:var(--yellow);">Gesamt</div>
@@ -1420,7 +1503,8 @@ window.showShowSummary = function(round) {
   const showSessions = Object.values(all).filter(s=>s.round===round);
   if (!showSessions.length) return;
 
-  const s0 = showSessions[0];
+  // Use session with most pairs as reference for statistics
+  const s0 = showSessions.reduce((a,b) => (b.pairs?.length||0) > (a.pairs?.length||0) ? b : a);
   const date = s0.date ? new Date(s0.date).toLocaleDateString('de-DE',{day:'2-digit',month:'long',year:'numeric'}) : '';
 
   // Nutzer-Ranking für diese Show
@@ -1483,7 +1567,7 @@ window.showShowSummary = function(round) {
     <div class="result-section">
       <div class="rs-title">🏆 Ranking diese Show</div>
       <table class="score-table">
-        <thead><tr><th></th><th>Nutzer</th><th>Punkte</th><th>🔥 Streak</th></tr></thead>
+        <thead><tr><th></th><th>Nutzer</th><th>Punkte</th><th>🔥 Staffel-Streak</th></tr></thead>
         <tbody>
           ${showRanking.map((u,i) => {
             const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`;
@@ -1610,7 +1694,7 @@ function renderHistory() {
       const color = getUserColor(s.userName);
       return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;border:1px solid ${color};color:${color};">${getInitials(s.userName)} ${s.userName}</span>`;
     }).join('');
-    const rid = round.replace(/[\s–]/g,'_');
+    const rid = round.replace(/[^a-zA-Z0-9]/g,'_');
     const showFrozen = isShowFrozen(all, round);
 
     return `
@@ -1665,7 +1749,7 @@ function renderHistoryBody(sessions, round, all) {
           </div>
           ${l&&m&&j ? `
           <div class="jury-official">
-            <div class="jot">⚖️ Jury (Mehrheitsentscheid)</div>
+            <div class="jot">⚖️ Jury ${(() => { const m = getJuryMeta(round); return m?.owner ? `(von ${m.owner})` : ''; })()}</div>
             <div class="jury-row">
               <span class="jury-pill"><span style="color:var(--pink);">Llambi</span> <strong>${l.modus}</strong>${l.consensus<1?' ⚠️':' ✅'}</span>
               <span class="jury-pill"><span style="color:var(--purple);">Motsi</span> <strong>${m.modus}</strong>${m.consensus<1?' ⚠️':' ✅'}</span>
@@ -1757,13 +1841,22 @@ window.renderLeaderboard = function() {
 // EXPORT / CLEAR
 // ═══════════════════════════════════════════
 window.exportLocal = function() {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(getLocalSessions(),null,2)],{type:'application/json'}));
+  const exportData = {
+    sessions: getLocalSessions(),
+    juryMeta: getLocalJuryMeta(),
+    userColors: getUserColorMap(),
+    exportedAt: new Date().toISOString()
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(exportData,null,2)],{type:'application/json'}));
   const a = document.createElement('a'); a.href=url; a.download=`letsdance2026_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(url);
   showToast('Export gestartet!');
 };
 window.clearLocal = function() {
-  if (!confirm('Alle lokalen Daten löschen?')) return;
-  localStorage.removeItem(LS_SESSIONS); showToast('Gelöscht','err');
+  if (!confirm('Alle lokalen Daten löschen? (Sessions + Jury-Zuordnungen + Farben)')) return;
+  localStorage.removeItem(LS_SESSIONS);
+  localStorage.removeItem('ld26_jury_meta');
+  localStorage.removeItem('ld26_user_colors');
+  showToast('Gelöscht','err');
 };
 
 // ═══════════════════════════════════════════
