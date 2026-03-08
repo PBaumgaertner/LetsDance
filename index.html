@@ -225,6 +225,10 @@
   .dash-card .dc-status{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
   .dash-card .dc-status.pending{color:var(--muted);}
   .dash-card .dc-status.done{color:var(--green);}
+  .dance-sub-btns{display:flex;gap:6px;margin-top:6px;}
+  .dance-sub-btn{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;transition:all .2s;text-align:center;line-height:1.3;}
+  .dance-sub-btn:hover:not(:disabled){filter:brightness(1.3);}
+  .dance-sub-btn:disabled{opacity:.4;cursor:default;}
   .dash-card .dc-status.frozen{color:var(--green);}
   .dash-done-icon{position:absolute;top:8px;right:8px;font-size:16px;}
   .dash-progress{display:flex;gap:3px;margin-top:6px;}
@@ -554,7 +558,7 @@ window._ld_queue = {};
 ['openUserModal','closeUserModal','addUser','selectUser','deleteUser',
  'setMode','saveFirebaseConfig','showTab','onShowChange','startRating',
  'switchD','setUS','setJS','saveSession','backToSetup','showDanceResult',
-      'startPairRound','finishUserScoring','finishJuryScoring','proceedFromHandover',
+      'startPairRound','startPairDance','openDanceFrozen','finishUserScoring','finishJuryScoring','proceedFromHandover',
       'proceedAfterPairResult','showFinalResults','saveAllAndBack','toggleEliminated',
       'showEliminationScreen','selectEliminatedPair','cancelElimination','confirmElimination',
  'closeDanceResult','showShowSummary','closeShowSummary',
@@ -1293,64 +1297,97 @@ function renderDashboard() {
 
   const grid = document.getElementById('dashboard-grid');
   grid.innerHTML = cur.pairs.map((p,pi) => {
-    // Next open dance for this pair
-    const nextDi = p.dances.findIndex((_,di) => {
+    const multiDance = p.dances.length > 1;
+
+    // Per-dance status
+    const danceInfos = p.dances.map((_,di) => {
       const key = `${pi}-${di}`;
       const allUsersDone = curUsers.every(u => cur.pairDone[u]?.has(key));
       const juryDone = cur.pairJuryDone.has(key);
-      return !(allUsersDone && juryDone);
+      const tanzDone = allUsersDone && juryDone;
+      const frozen = isTanzFrozen(all, cur.round, p.promi, di);
+      const nextUser = curUsers.find(u => !cur.pairDone[u]?.has(key));
+      const needsJury = allUsersDone && !juryDone && cur.isJuryOwner;
+      const tanzLabel = cur.danceNames[pi][di] || `Tanz ${di+1}`;
+      return { di, key, tanzDone, frozen, nextUser, needsJury, tanzLabel };
     });
-    const fullyDone = nextDi === -1;
-    const frozen = isTanzFrozen(all, cur.round, p.promi, 0);
 
-    // Status per dance dot
-    const dots = p.dances.map((_,di) => {
-      const key = `${pi}-${di}`;
-      const allDone = curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
-      const partial = curUsers.some(u => cur.pairDone[u]?.has(key));
-      return `<div class="dash-dot ${allDone?'done':partial?'partial':''}"></div>`;
-    }).join('');
+    const allFrozen = danceInfos.every(d => d.frozen);
+    const allDone = danceInfos.every(d => d.tanzDone);
 
-    let statusText, icon, clickable;
-    if (fullyDone || frozen) {
-      statusText = frozen ? '🔒 Eingefroren' : '✅ Alle Tänze fertig';
-      icon = frozen ? '🔒' : '✅';
-      clickable = false;
-    } else {
-      const key = `${pi}-${nextDi}`;
-      const allUsersDoneNext = curUsers.every(u => cur.pairDone[u]?.has(key));
-      const juryDoneNext = cur.pairJuryDone.has(key);
-      const needsJury = allUsersDoneNext && !juryDoneNext && cur.isJuryOwner;
+    // Card-level status text (for 1-dance pairs or summary)
+    let cardIcon = '';
+    if (allFrozen) cardIcon = '🔒';
+    else if (allDone) cardIcon = '✅';
 
-      if (needsJury) {
-        statusText = `⚖️ Jury: Tanz ${nextDi+1}`;
-        icon = '⚖️';
-        clickable = true;
-      } else {
-        const nextUser = curUsers.find(u => !cur.pairDone[u]?.has(key));
-        if (nextUser) {
+    if (multiDance) {
+      // Sub-buttons per dance
+      const tanzBtns = danceInfos.map(({di, frozen, tanzDone, nextUser, needsJury, tanzLabel}) => {
+        let btnStyle = '', btnLabel = tanzLabel, btnClick = '';
+        if (frozen) {
+          btnStyle = 'border-color:var(--frozen-border);color:var(--green);background:var(--frozen);';
+          btnLabel = `🔒 ${tanzLabel}`;
+          btnClick = `openDanceFrozen(${pi},${di})`;
+        } else if (tanzDone) {
+          btnStyle = 'border-color:#556;color:var(--muted);';
+          btnLabel = `✅ ${tanzLabel}`;
+          btnClick = `startPairDance(${pi},${di})`;
+        } else if (needsJury) {
+          btnStyle = 'border-color:var(--green);color:var(--green);';
+          btnLabel = `⚖️ ${tanzLabel}`;
+          btnClick = `startPairDance(${pi},${di})`;
+        } else if (nextUser) {
           const col = getUserColor(nextUser);
-          const tanzLabel = p.dances.length > 1 ? ` · Tanz ${nextDi+1}` : '';
-          statusText = `<span style="color:${col}">👤 ${nextUser}${tanzLabel}</span>`;
-          icon = '';
-          clickable = true;
+          btnStyle = `border-color:${col};color:${col};`;
+          btnLabel = `${tanzLabel}`;
+          btnClick = `startPairDance(${pi},${di})`;
         } else {
-          statusText = '⏳ Warten…';
-          icon = '';
-          clickable = false;
+          btnStyle = 'border-color:var(--border);color:var(--muted);opacity:.5;';
+          btnClick = '';
         }
-      }
-    }
+        return `<button class="dance-sub-btn" style="${btnStyle}"
+          onclick="event.stopPropagation();${btnClick}"
+          ${!btnClick ? 'disabled' : ''}>${btnLabel}</button>`;
+      }).join('');
 
-    return `<div class="dash-card ${fullyDone||frozen?'done':''}"
-      style="${clickable?'cursor:pointer;':''}"
-      onclick="${clickable ? `startPairRound(${pi})` : ''}">
-      ${icon ? `<div class="dash-done-icon">${icon}</div>` : ''}
-      <div class="dc-promi">${p.promi}</div>
-      <div class="dc-profi">${p.profi}</div>
-      <div class="dash-progress">${dots}</div>
-      <div class="dc-status">${statusText}</div>
-    </div>`;
+      return `<div class="dash-card ${allFrozen||allDone?'done':''}">
+        ${cardIcon ? `<div class="dash-done-icon">${cardIcon}</div>` : ''}
+        <div class="dc-promi">${p.promi}</div>
+        <div class="dc-profi">${p.profi}</div>
+        <div class="dance-sub-btns">${tanzBtns}</div>
+      </div>`;
+
+    } else {
+      // Single dance – whole card is clickable
+      const {di, frozen, tanzDone, nextUser, needsJury, tanzLabel} = danceInfos[0];
+      let statusText = '', icon = '', clickable = false, clickFn = '';
+
+      if (frozen) {
+        statusText = '🔒 Eingefroren'; icon = '🔒'; clickable = true;
+        clickFn = `openDanceFrozen(${pi},0)`;
+      } else if (tanzDone) {
+        statusText = '✅ Abgeschlossen'; icon = '✅'; clickable = true;
+        clickFn = `startPairDance(${pi},0)`;
+      } else if (needsJury) {
+        statusText = '⚖️ Jury eingeben'; icon = '⚖️'; clickable = true;
+        clickFn = `startPairDance(${pi},0)`;
+      } else if (nextUser) {
+        const col = getUserColor(nextUser);
+        statusText = `<span style="color:${col}">👤 ${nextUser}</span>`;
+        clickable = true; clickFn = `startPairDance(${pi},0)`;
+      } else {
+        statusText = '⏳ Warten…';
+      }
+
+      return `<div class="dash-card ${frozen||tanzDone?'done':''}"
+        style="${clickable?'cursor:pointer;':''}"
+        onclick="${clickFn}">
+        ${icon ? `<div class="dash-done-icon">${icon}</div>` : ''}
+        <div class="dc-promi">${p.promi}</div>
+        <div class="dc-profi">${p.profi}</div>
+        <div class="dc-status">${statusText}</div>
+      </div>`;
+    }
   }).join('');
 
   const allDone = cur.pairs.every((_,pi) =>
@@ -1366,21 +1403,13 @@ function renderDashboard() {
        <button class="btn danger" style="margin-top:6px;" onclick="backToSetup()">✕ Abbrechen</button>`;
 }
 
-// ── PAAR-RUNDE STARTEN ───────────────────────────────────
-window.startPairRound = function(pi) {
+// ── TANZ DIREKT ÖFFNEN (aus Dashboard) ───────────────────
+window.startPairDance = function(pi, di) {
   activePairIdx = pi;
-  ratingUserIdx = 0;
-
-  // Find next open dance for this pair
-  const di = cur.pairs[pi].dances.findIndex((_,di) => {
-    const key = `${pi}-${di}`;
-    return !(curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key));
-  });
-  if (di === -1) { showScreen('dashboard'); renderDashboard(); return; }
   activeDanceIdx = di;
+  ratingUserIdx = 0;
   buildSbar();
 
-  // Find next user who hasn't scored this dance
   const key = `${pi}-${di}`;
   const firstPending = curUsers.findIndex(u => !cur.pairDone[u]?.has(key));
   if (firstPending === -1) {
@@ -1388,13 +1417,35 @@ window.startPairRound = function(pi) {
     if (cur.isJuryOwner && !cur.pairJuryDone.has(key)) {
       showJuryScreen(pi, di);
     } else {
-      showScreen('dashboard');
-      renderDashboard();
+      // Already fully done – re-open scoring for editing
+      showScoringScreen(pi, di, 0);
     }
     return;
   }
   ratingUserIdx = firstPending;
   showScoringScreen(pi, di, ratingUserIdx);
+};
+
+// Eingefroren: nur Auswertung zeigen (read-only)
+window.openDanceFrozen = function(pi, di) {
+  activePairIdx = pi;
+  activeDanceIdx = di;
+  window._pairResultBack = true;
+  const all = getAllSessions();
+  showScreen('pair-result');
+  document.getElementById('pair-result-content').innerHTML = buildDanceBoard(pi, di, all);
+  const btn = document.getElementById('pair-result-next-btn');
+  btn.textContent = '← Zurück';
+  btn.className = 'btn sec';
+};
+
+// ── PAAR-RUNDE STARTEN (legacy – findet nächsten offenen Tanz) ───────────────────
+window.startPairRound = function(pi) {
+  const di = cur.pairs[pi].dances.findIndex((_,di) => {
+    const key = `${pi}-${di}`;
+    return !(curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key));
+  });
+  startPairDance(pi, di === -1 ? 0 : di);
 };
 
 // ── NUTZER SCORING SCREEN ────────────────────────────────
@@ -1827,6 +1878,13 @@ function showPairResult(pi, di, isLast) {
 }
 
 window.proceedAfterPairResult = function() {
+  // Frozen dance read-only view → back to dashboard
+  if (window._pairResultBack) {
+    window._pairResultBack = false;
+    showScreen('dashboard');
+    renderDashboard();
+    return;
+  }
   const isLast = cur.pairs.every((_,pi) =>
     cur.pairs[pi].dances.every((_,di) => {
       const key = `${pi}-${di}`;
@@ -2516,7 +2574,11 @@ window._ld_register({
   switchD, setUS, setJS, saveSession, backToSetup, showDanceResult,
   closeDanceResult, showShowSummary, closeShowSummary,
   setLbView, renderLeaderboard, togH, exportLocal, clearLocal,
-  onMitspielerChange
+  onMitspielerChange,
+  startPairRound, startPairDance, openDanceFrozen,
+  finishUserScoring, finishJuryScoring, proceedFromHandover,
+  proceedAfterPairResult, showFinalResults, saveAllAndBack,
+  showEliminationScreen, selectEliminatedPair, cancelElimination, confirmElimination
 });
 
 init();
