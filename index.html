@@ -1239,9 +1239,30 @@ window.startRating = async function() {
   );
 
   // Tracking which dances are fully scored per user (key = "pi-di")
-  cur.pairDone = {}; // { userName: Set<"pi-di"> }
-  curUsers.forEach(u => { cur.pairDone[u] = new Set(); });
+  // Preload from already saved sessions for this show
+  cur.pairDone = {};
+  curUsers.forEach(u => {
+    cur.pairDone[u] = new Set();
+    const saved = Object.values(all).find(s => s.round === label && s.userName === u);
+    if (saved) {
+      pairs.forEach((p, pi) => {
+        p.dances.forEach((_, di) => {
+          const savedScore = saved.pairs?.find(pp => pp.promi === p.promi)?.dances?.[di]?.scores?.you;
+          if (savedScore > 0) cur.pairDone[u].add(`${pi}-${di}`);
+        });
+      });
+    }
+  });
+
   cur.pairJuryDone = new Set(); // Set<"pi-di"> where jury is complete
+  pairs.forEach((p, pi) => {
+    p.dances.forEach((_, di) => {
+      const js = cur.juryScores[pi][di];
+      if (js.jorge > 0 && js.motsi > 0 && js.llambi > 0) {
+        cur.pairJuryDone.add(`${pi}-${di}`);
+      }
+    });
+  });
 
   // State
   ratingPhase = 'dashboard';
@@ -1302,7 +1323,9 @@ function renderDashboard() {
     // Per-dance status
     const danceInfos = p.dances.map((_,di) => {
       const key = `${pi}-${di}`;
-      const allUsersDone = curUsers.every(u => cur.pairDone[u]?.has(key));
+      // Use isTanzFrozen as source-of-truth for "all users have scored"
+      const allUsersDone = isTanzFrozen(all, cur.round, p.promi, di) ||
+                           curUsers.every(u => cur.pairDone[u]?.has(key));
       const juryDone = cur.pairJuryDone.has(key);
       const tanzDone = allUsersDone && juryDone;
       const frozen = isTanzFrozen(all, cur.round, p.promi, di);
@@ -1390,10 +1413,12 @@ function renderDashboard() {
     }
   }).join('');
 
-  const allDone = cur.pairs.every((_,pi) =>
-    cur.pairs[pi].dances.every((_,di) => {
+  const allDone = cur.pairs.every((p,pi) =>
+    p.dances.every((_,di) => {
       const key = `${pi}-${di}`;
-      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+      const allUsersDone = isTanzFrozen(all, cur.round, p.promi, di) ||
+                           curUsers.every(u => cur.pairDone[u]?.has(key));
+      return allUsersDone && cur.pairJuryDone.has(key);
     })
   );
   document.getElementById('dashboard-footer').innerHTML = allDone
@@ -1675,10 +1700,13 @@ window.finishJuryScoring = function() {
 function finishDanceRound(pi, di) {
   saveAllCurrentScores();
 
-  const isLast = cur.pairs.every((_,pIdx) =>
-    cur.pairs[pIdx].dances.every((_,dIdx) => {
+  const all = getAllSessions();
+  const isLast = cur.pairs.every((p,pIdx) =>
+    p.dances.every((_,dIdx) => {
       const key = `${pIdx}-${dIdx}`;
-      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+      const allUsersDone = isTanzFrozen(all, cur.round, p.promi, dIdx) ||
+                           curUsers.every(u => cur.pairDone[u]?.has(key));
+      return allUsersDone && cur.pairJuryDone.has(key);
     })
   );
   showPairResult(pi, di, isLast);
@@ -1898,10 +1926,13 @@ window.proceedAfterPairResult = function() {
     renderDashboard();
     return;
   }
-  const isLast = cur.pairs.every((_,pi) =>
-    cur.pairs[pi].dances.every((_,di) => {
+  const all = getAllSessions();
+  const isLast = cur.pairs.every((p,pi) =>
+    p.dances.every((_,di) => {
       const key = `${pi}-${di}`;
-      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+      const allUsersDone = isTanzFrozen(all, cur.round, p.promi, di) ||
+                           curUsers.every(u => cur.pairDone[u]?.has(key));
+      return allUsersDone && cur.pairJuryDone.has(key);
     })
   );
   if (isLast) {
