@@ -80,6 +80,10 @@
   .add-user-row input{flex:1;margin:0;}
   .add-user-row button{background:var(--pink);color:#fff;border:none;border-radius:8px;padding:0 14px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;}
 
+  /* SCORING BOARDS */
+  .sb-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+  .sb-title{font-family:'Bebas Neue',cursive;font-size:16px;letter-spacing:1.5px;color:var(--muted);margin-bottom:10px;}
+
   /* FREEZE / RESULT MODAL */
   .result-modal{border-color:var(--yellow);max-width:460px;}
   .result-modal h2{color:var(--yellow);}
@@ -646,9 +650,10 @@ function getActivePairs(showLabel) {
 }
 
 // Sequentielles Rating State
-let ratingPhase = 'users';    // 'users' | 'jury'
-let ratingUserIdx = 0;        // welcher Nutzer ist gerade dran
-let activePairIdx = null;     // welches Paar ist gerade offen (dashboard)
+let ratingPhase = 'users';
+let ratingUserIdx = 0;
+let activePairIdx = null;
+let activeDanceIdx = 0;     // welcher Tanz-Index ist gerade offen
 
 // ═══════════════════════════════════════════
 // NUTZER
@@ -1229,15 +1234,16 @@ window.startRating = async function() {
     })
   );
 
-  // Tracking which pairs are fully scored per user
-  cur.pairDone = {}; // { userName: Set<pi> }
+  // Tracking which dances are fully scored per user (key = "pi-di")
+  cur.pairDone = {}; // { userName: Set<"pi-di"> }
   curUsers.forEach(u => { cur.pairDone[u] = new Set(); });
-  cur.pairJuryDone = new Set(); // Set<pi> where jury is complete
+  cur.pairJuryDone = new Set(); // Set<"pi-di"> where jury is complete
 
   // State
-  ratingPhase = 'dashboard'; // 'dashboard' | 'user' | 'jury' | 'pairResult' | 'final'
+  ratingPhase = 'dashboard';
   ratingUserIdx = 0;
   activePairIdx = null;
+  activeDanceIdx = 0;
 
   document.getElementById('setup').style.display = 'none';
   document.getElementById('rating').style.display = 'block';
@@ -1270,56 +1276,70 @@ function renderDashboard() {
   const all = getAllSessions();
 
   // Progress pills
-  const done = cur.pairs.filter((_,pi) =>
-    curUsers.every(u => cur.pairDone[u]?.has(pi)) && cur.pairJuryDone.has(pi)
-  ).length;
+  const done = cur.pairs.reduce((acc, _, pi) =>
+    acc + cur.pairs[pi].dances.filter((_,di) =>
+      curUsers.every(u => cur.pairDone[u]?.has(`${pi}-${di}`)) && cur.pairJuryDone.has(`${pi}-${di}`)
+    ).length, 0);
+  const totalDances = cur.pairs.reduce((a, p) => a + p.dances.length, 0);
 
   document.getElementById('dashboard-header').innerHTML =
     `<div class="phase-header">
       <div class="ph-av" style="background:var(--pink);color:#fff;font-size:22px;">🎬</div>
       <div class="ph-info">
         <div class="ph-name">${cur.round}</div>
-        <div class="ph-sub">${done}/${cur.pairs.length} Paare abgeschlossen · ${curUsers.length} Spieler</div>
+        <div class="ph-sub">${done}/${totalDances} Tänze bewertet · ${curUsers.length} Spieler</div>
       </div>
     </div>`;
 
   const grid = document.getElementById('dashboard-grid');
   grid.innerHTML = cur.pairs.map((p,pi) => {
-    const allUsersDone = curUsers.every(u => cur.pairDone[u]?.has(pi));
-    const juryDone = cur.pairJuryDone.has(pi);
+    // Next open dance for this pair
+    const nextDi = p.dances.findIndex((_,di) => {
+      const key = `${pi}-${di}`;
+      const allUsersDone = curUsers.every(u => cur.pairDone[u]?.has(key));
+      const juryDone = cur.pairJuryDone.has(key);
+      return !(allUsersDone && juryDone);
+    });
+    const fullyDone = nextDi === -1;
     const frozen = isTanzFrozen(all, cur.round, p.promi, 0);
-    const fullyDone = allUsersDone && juryDone;
 
-    // Which user is next for this pair?
-    let nextUser = null;
-    for (const u of curUsers) {
-      if (!cur.pairDone[u]?.has(pi)) { nextUser = u; break; }
-    }
-    const needsJury = allUsersDone && !juryDone && cur.isJuryOwner;
-
-    const dots = cur.pairs[pi].dances.map((_,di) => {
-      const hasScore = cur.userScores[curUsers[0]]?.[pi]?.[di] > 0;
-      return `<div class="dash-dot ${hasScore?'done':''}"></div>`;
+    // Status per dance dot
+    const dots = p.dances.map((_,di) => {
+      const key = `${pi}-${di}`;
+      const allDone = curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+      const partial = curUsers.some(u => cur.pairDone[u]?.has(key));
+      return `<div class="dash-dot ${allDone?'done':partial?'partial':''}"></div>`;
     }).join('');
 
     let statusText, icon, clickable;
     if (fullyDone || frozen) {
-      statusText = frozen ? '🔒 Eingefroren' : '✅ Abgeschlossen';
+      statusText = frozen ? '🔒 Eingefroren' : '✅ Alle Tänze fertig';
       icon = frozen ? '🔒' : '✅';
       clickable = false;
-    } else if (needsJury) {
-      statusText = '⚖️ Jury eingeben';
-      icon = '⚖️';
-      clickable = true;
-    } else if (nextUser) {
-      const col = getUserColor(nextUser);
-      statusText = `<span style="color:${col}">👤 ${nextUser} ist dran</span>`;
-      icon = '';
-      clickable = true;
     } else {
-      statusText = '⏳ Warten…';
-      icon = '';
-      clickable = false;
+      const key = `${pi}-${nextDi}`;
+      const allUsersDoneNext = curUsers.every(u => cur.pairDone[u]?.has(key));
+      const juryDoneNext = cur.pairJuryDone.has(key);
+      const needsJury = allUsersDoneNext && !juryDoneNext && cur.isJuryOwner;
+
+      if (needsJury) {
+        statusText = `⚖️ Jury: Tanz ${nextDi+1}`;
+        icon = '⚖️';
+        clickable = true;
+      } else {
+        const nextUser = curUsers.find(u => !cur.pairDone[u]?.has(key));
+        if (nextUser) {
+          const col = getUserColor(nextUser);
+          const tanzLabel = p.dances.length > 1 ? ` · Tanz ${nextDi+1}` : '';
+          statusText = `<span style="color:${col}">👤 ${nextUser}${tanzLabel}</span>`;
+          icon = '';
+          clickable = true;
+        } else {
+          statusText = '⏳ Warten…';
+          icon = '';
+          clickable = false;
+        }
+      }
     }
 
     return `<div class="dash-card ${fullyDone||frozen?'done':''}"
@@ -1334,7 +1354,10 @@ function renderDashboard() {
   }).join('');
 
   const allDone = cur.pairs.every((_,pi) =>
-    curUsers.every(u => cur.pairDone[u]?.has(pi)) && cur.pairJuryDone.has(pi)
+    cur.pairs[pi].dances.every((_,di) => {
+      const key = `${pi}-${di}`;
+      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+    })
   );
   document.getElementById('dashboard-footer').innerHTML = allDone
     ? `<button class="btn gold" style="margin-top:8px;" onclick="showFinalResults()">🏆 GESAMTAUSWERTUNG</button>
@@ -1347,14 +1370,23 @@ function renderDashboard() {
 window.startPairRound = function(pi) {
   activePairIdx = pi;
   ratingUserIdx = 0;
+
+  // Find next open dance for this pair
+  const di = cur.pairs[pi].dances.findIndex((_,di) => {
+    const key = `${pi}-${di}`;
+    return !(curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key));
+  });
+  if (di === -1) { showScreen('dashboard'); renderDashboard(); return; }
+  activeDanceIdx = di;
   buildSbar();
 
-  // Find next user who hasn't scored this pair
-  const firstPending = curUsers.findIndex(u => !cur.pairDone[u]?.has(pi));
+  // Find next user who hasn't scored this dance
+  const key = `${pi}-${di}`;
+  const firstPending = curUsers.findIndex(u => !cur.pairDone[u]?.has(key));
   if (firstPending === -1) {
     // All users done – check jury
-    if (cur.isJuryOwner && !cur.pairJuryDone.has(pi)) {
-      showJuryScreen(pi);
+    if (cur.isJuryOwner && !cur.pairJuryDone.has(key)) {
+      showJuryScreen(pi, di);
     } else {
       showScreen('dashboard');
       renderDashboard();
@@ -1362,22 +1394,25 @@ window.startPairRound = function(pi) {
     return;
   }
   ratingUserIdx = firstPending;
-  showScoringScreen(pi, ratingUserIdx);
+  showScoringScreen(pi, di, ratingUserIdx);
 };
 
 // ── NUTZER SCORING SCREEN ────────────────────────────────
-function showScoringScreen(pi, userIdx) {
+function showScoringScreen(pi, di, userIdx) {
   ratingUserIdx = userIdx;
+  activeDanceIdx = di;
   const u = curUsers[userIdx];
   const col = getUserColor(u);
   const p = cur.pairs[pi];
   const all = getAllSessions();
+  const key = `${pi}-${di}`;
+  const tanzLabel = cur.danceNames[pi][di] || `Tanz ${di+1}`;
 
   showScreen('scoring');
 
   // Header: wer ist dran + Fortschritt
   const stepPills = curUsers.map((uu, i) => {
-    const isDone = cur.pairDone[uu]?.has(pi);
+    const isDone = cur.pairDone[uu]?.has(key);
     const isActive = i === userIdx;
     const cls = isDone ? 'done' : isActive ? 'active' : '';
     return `<span class="pp-step ${cls}" style="${isActive?'border-color:'+col+';color:'+col+';background:#1a0010;':''}">${isDone?'✓ ':''} ${uu}</span>`;
@@ -1388,53 +1423,46 @@ function showScoringScreen(pi, userIdx) {
       <div class="ph-av" style="background:${col};">${getInitials(u)}</div>
       <div class="ph-info">
         <div class="ph-name" style="color:${col};">${u}</div>
-        <div class="ph-sub">${p.promi} · ${p.profi}</div>
+        <div class="ph-sub">${p.promi} · ${tanzLabel}</div>
       </div>
     </div>
     <div class="phase-progress">${stepPills}<span class="pp-step">⚖️ Jury</span></div>`;
 
-  // Scoring card – only current user's rows
-  const frozen = isTanzFrozen(all, cur.round, p.promi, 0);
-  document.getElementById('scoring-content').innerHTML = buildUserScoringCard(pi, u, frozen);
+  // Scoring card – single dance only
+  const frozen = isTanzFrozen(all, cur.round, p.promi, di);
+  document.getElementById('scoring-content').innerHTML = buildUserScoringCard(pi, di, u, frozen);
 
   // Button text
   const isLastUser = userIdx === curUsers.length - 1;
   const nextLabel = isLastUser
-    ? (cur.isJuryOwner ? '⚖️ Weiter zur Jury' : '✅ Paar abschließen')
+    ? (cur.isJuryOwner ? '⚖️ Weiter zur Jury' : '✅ Tanz abschließen')
     : `Weiter zu ${curUsers[userIdx+1]} →`;
   document.getElementById('scoring-next-btn').textContent = nextLabel;
-
-  switchD(pi, 0);
 }
 
-function buildUserScoringCard(pi, userName, frozen) {
+function buildUserScoringCard(pi, di, userName, frozen) {
   const p = cur.pairs[pi];
   const col = getUserColor(userName);
   const dis = frozen ? 'disabled' : '';
+  const val = cur.userScores[userName]?.[pi]?.[di] || 0;
 
-  return p.dances.map((_, di) => {
-    const val = cur.userScores[userName]?.[pi]?.[di] || 0;
-    const danceName = cur.danceNames[pi][di] || ('Tanz ' + (di+1));
-    return `<div class="dpanel ${di===0?'active':''}" id="udp-${pi}-${di}">
-          <input type="text" placeholder="z. B. Cha-Cha-Cha…" value="${cur.danceNames[pi][di]||''}" ${dis}
-            oninput="cur.danceNames[${pi}][${di}]=this.value">
-        </div>
-        <div class="user-score-row">
-          <div class="rlbl" style="color:${col};min-width:70px;">${userName}</div>
-          <div class="sbtns" id="sb-${pi}-${di}-${userName.replace(/[^a-zA-Z0-9]/g,'_')}">
-            ${[1,2,3,4,5,6,7,8,9,10].map(v => `
-              <button class="sb ${val===v?'ay':''}" data-v="${v}" ${dis}
-                style="${val===v?'background:'+col+';border-color:'+col+';color:#000;':''}"
-                onclick="setUS(${pi},${di},'${userName.replace(/'/g,"\'")}',${v})">${v}</button>`
-            ).join('')}
-          </div>
-        </div>
+  return `<div style="padding:12px 16px;">
+    <div class="field" style="margin-bottom:10px;">
+      <label>Tanzstil (optional)</label>
+      <input type="text" placeholder="z. B. Cha-Cha-Cha…" value="${cur.danceNames[pi][di]||''}" ${dis}
+        oninput="cur.danceNames[${pi}][${di}]=this.value">
+    </div>
+    <div class="user-score-row">
+      <div class="rlbl" style="color:${col};min-width:70px;">${userName}</div>
+      <div class="sbtns" id="sb-${pi}-${di}-${userName.replace(/[^a-zA-Z0-9]/g,'_')}">
+        ${[1,2,3,4,5,6,7,8,9,10].map(v => `
+          <button class="sb ${val===v?'ay':''}" data-v="${v}" ${dis}
+            style="${val===v?'background:'+col+';border-color:'+col+';color:#000;':''}"
+            onclick="setUS(${pi},${di},'${userName.replace(/'/g,"\\'")}',${v})">${v}</button>`
+        ).join('')}
       </div>
-    </div>`;
-  }).join('') + (p.dances.length > 1 ?
-    `<div class="dtabs" id="udtabs-${pi}" style="order:-1;">${p.dances.map((_,di)=>
-      `<button class="dtab ${di===0?'active':''}" onclick="switchD(${pi},${di})">${cur.danceNames[pi][di]||'Tanz '+(di+1)}</button>`
-    ).join('')}</div>` : '');
+    </div>
+  </div>`;
 }
 
 // ── BUTTON-INTERAKTIONEN ─────────────────────────────────
@@ -1475,48 +1503,50 @@ window.setJS = function(pi, di, juror, val) {
 
 window.finishUserScoring = function() {
   const pi = activePairIdx;
+  const di = activeDanceIdx;
   const u = curUsers[ratingUserIdx];
+  const key = `${pi}-${di}`;
 
-  // Mark done
+  // Mark this dance done for this user
   if (!cur.pairDone[u]) cur.pairDone[u] = new Set();
-  cur.pairDone[u].add(pi);
+  cur.pairDone[u].add(key);
 
-  // Auto-save this user's scores
+  // Auto-save
   autoSavePair(pi, u);
 
   const nextUserIdx = ratingUserIdx + 1;
   if (nextUserIdx < curUsers.length) {
-    // Show handover to next user
     showHandover(
       curUsers[nextUserIdx],
       getUserColor(curUsers[nextUserIdx]),
-      `${cur.pairs[pi].promi} · ${nextUserIdx + 1} von ${curUsers.length} Spielern`,
+      `${cur.pairs[pi].promi} · Tanz ${di+1} · ${nextUserIdx + 1} von ${curUsers.length} Spielern`,
       '🤝',
-      () => showScoringScreen(pi, nextUserIdx)
+      () => showScoringScreen(pi, di, nextUserIdx)
     );
   } else {
-    // All users done for this pair
+    // All users done for this dance
     if (cur.isJuryOwner) {
       showHandover(
         cur.juryOwner,
         'var(--green)',
-        `Alle Wertungen für ${cur.pairs[pi].promi} abgegeben – jetzt Jury-Punkte eingeben`,
+        `Alle Wertungen für ${cur.pairs[pi].promi} · Tanz ${di+1} abgegeben`,
         '⚖️',
-        () => showJuryScreen(pi),
+        () => showJuryScreen(pi, di),
         'Jury eingeben',
         '#0a1a00',
         '⚖️ JURY-WERTUNG STARTEN'
       );
     } else {
-      // No jury owner on this device – skip to pair result
-      finishPairRound(pi);
+      finishDanceRound(pi, di);
     }
   }
 };
 
 // ── JURY SCREEN ──────────────────────────────────────────
-function showJuryScreen(pi) {
+function showJuryScreen(pi, di) {
+  activeDanceIdx = di;
   const p = cur.pairs[pi];
+  const tanzLabel = cur.danceNames[pi][di] || `Tanz ${di+1}`;
   showScreen('jury');
 
   const stepPills = [...curUsers.map(u =>
@@ -1528,154 +1558,283 @@ function showJuryScreen(pi) {
       <div class="ph-av" style="background:var(--green);font-size:22px;">⚖️</div>
       <div class="ph-info">
         <div class="ph-name" style="color:var(--green);">Jury – ${cur.juryOwner}</div>
-        <div class="ph-sub">${p.promi} · ${p.profi}</div>
+        <div class="ph-sub">${p.promi} · ${tanzLabel}</div>
       </div>
     </div>
     <div class="phase-progress">${stepPills}</div>`;
 
-  document.getElementById('jury-content').innerHTML = buildJuryCard(pi);
-  switchD(pi, 0);
+  document.getElementById('jury-content').innerHTML = buildJuryCard(pi, di);
 }
 
-function buildJuryCard(pi) {
-  const p = cur.pairs[pi];
-  return p.dances.map((_,di) => {
-    const js = cur.juryScores[pi][di];
-    return `<div class="dpanel ${di===0?'active':''}" id="dp-${pi}-${di}">
-      <div style="padding:12px 16px;">
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
-          ⚖️ Jorge → Motsi → Llambi
+function buildJuryCard(pi, di) {
+  const js = cur.juryScores[pi][di];
+  return `<div style="padding:12px 16px;">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">
+      ⚖️ Jorge → Motsi → Llambi
+    </div>
+    ${['jorge','motsi','llambi'].map(j => {
+      const clsMap = {llambi:'al',motsi:'am',jorge:'aj'};
+      const jval = js[j]||0;
+      return `<div class="rrow">
+        <div class="rlbl ${j}">${j.charAt(0).toUpperCase()+j.slice(1)}</div>
+        <div class="sbtns" id="sb-${pi}-${di}-${j}">
+          ${[1,2,3,4,5,6,7,8,9,10].map(v =>
+            `<button class="sb ${jval===v?clsMap[j]:''}" data-v="${v}"
+              onclick="setJS(${pi},${di},'${j}',${v})">${v}</button>`
+          ).join('')}
         </div>
-        ${['jorge','motsi','llambi'].map(j => {
-          const clsMap = {llambi:'al',motsi:'am',jorge:'aj'};
-          const jval = js[j]||0;
-          return `<div class="rrow">
-            <div class="rlbl ${j}">${j.charAt(0).toUpperCase()+j.slice(1)}</div>
-            <div class="sbtns" id="sb-${pi}-${di}-${j}">
-              ${[1,2,3,4,5,6,7,8,9,10].map(v =>
-                `<button class="sb ${jval===v?clsMap[j]:''}" data-v="${v}"
-                  onclick="setJS(${pi},${di},'${j}',${v})">${v}</button>`
-              ).join('')}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }).join('') + (p.dances.length > 1 ?
-    `<div class="dtabs" id="dtabs-${pi}" style="order:-1;">${p.dances.map((_,di)=>
-      `<button class="dtab ${di===0?'active':''}" onclick="switchD(${pi},${di})">${cur.danceNames[pi][di]||'Tanz '+(di+1)}</button>`
-    ).join('')}</div>` : '');
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 window.finishJuryScoring = function() {
   const pi = activePairIdx;
-  // Validate jury completeness
-  const complete = cur.pairs[pi].dances.every((_,di) => {
-    const js = cur.juryScores[pi][di];
-    return js?.jorge > 0 && js?.motsi > 0 && js?.llambi > 0;
-  });
+  const di = activeDanceIdx;
+  const key = `${pi}-${di}`;
+  const js = cur.juryScores[pi][di];
+  const complete = js?.jorge > 0 && js?.motsi > 0 && js?.llambi > 0;
   if (!complete) {
     if (!confirm('⚠️ Nicht alle Jury-Felder ausgefüllt. Trotzdem weiter?')) return;
   }
 
-  // Save jury scores to juryMeta
   (async () => {
-    for (let di=0; di < cur.pairs[pi].dances.length; di++) {
-      const js = cur.juryScores[pi][di];
-      if (js?.jorge > 0 || js?.motsi > 0 || js?.llambi > 0) {
-        await saveJuryScores(cur.round, cur.pairs[pi].promi, di, js);
-      }
+    if (js?.jorge > 0 || js?.motsi > 0 || js?.llambi > 0) {
+      await saveJuryScores(cur.round, cur.pairs[pi].promi, di, js);
     }
-    cur.pairJuryDone.add(pi);
-    finishPairRound(pi);
+    cur.pairJuryDone.add(key);
+    finishDanceRound(pi, di);
   })();
 };
 
-// ── PAIR RESULT ──────────────────────────────────────────
-function finishPairRound(pi) {
-  // Also save jury owner's scores as full session now
+// ── DANCE RESULT ──────────────────────────────────────────
+function finishDanceRound(pi, di) {
   saveAllCurrentScores();
 
   const isLast = cur.pairs.every((_,pIdx) =>
-    curUsers.every(u => cur.pairDone[u]?.has(pIdx)) && cur.pairJuryDone.has(pIdx)
+    cur.pairs[pIdx].dances.every((_,dIdx) => {
+      const key = `${pIdx}-${dIdx}`;
+      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+    })
   );
-  showPairResult(pi, isLast);
+  showPairResult(pi, di, isLast);
 }
 
-function showPairResult(pi, isLast) {
+// ── SCORING BOARD HELPERS ────────────────────────────────
+
+// Tanz-Board: Jury + eigene Wertung + Punkte für einen Tanz
+function buildDanceBoard(pi, di, all) {
+  const p = cur.pairs[pi];
+  const danceName = cur.danceNames[pi][di] || `Tanz ${di+1}`;
+  const jl = calcOfficialJuror(all, cur.round, p.promi, di, 'llambi');
+  const jm = calcOfficialJuror(all, cur.round, p.promi, di, 'motsi');
+  const jj = calcOfficialJuror(all, cur.round, p.promi, di, 'jorge');
+  const juryAvg = (jj && jm && jl) ? ((jj.modus + jm.modus + jl.modus) / 3) : null;
+  const users = curUsers.length > 0 ? curUsers : getUsers();
+
+  let html = `<div class="sb-section">
+    <div class="sb-title">🎯 ${danceName} · ${p.promi}</div>`;
+
+  // Jury pills
+  if (jj || jm || jl) {
+    html += `<div class="jury-consensus" style="margin-bottom:10px;">
+      ${[{j:jj,n:'Jorge',cls:'jorge'},{j:jm,n:'Motsi',cls:'motsi'},{j:jl,n:'Llambi',cls:'llambi'}].map(({j,n,cls}) => j ? `
+      <div class="jc-pill">
+        <div class="jcp-name ${cls}">${n}</div>
+        <div class="jcp-val" style="color:var(--${cls==='jorge'?'blue':cls==='motsi'?'purple':'pink'})">${j.modus}</div>
+      </div>` : '').join('')}
+      ${juryAvg ? `<div class="jc-pill full"><div class="jcp-name" style="color:var(--green);">Ø</div><div class="jcp-val" style="color:var(--green);">${juryAvg.toFixed(1)}</div></div>` : ''}
+    </div>`;
+  }
+
+  // User rows
+  const userRows = users.map(u => {
+    const sc = calcUserScoreForDance(all, cur.round, p.promi, di, u);
+    if (!sc) return '';
+    const col = getUserColor(u);
+    return `<tr>
+      <td><span style="color:${col};font-weight:700;">${u}</span></td>
+      <td style="font-family:'Bebas Neue',cursive;font-size:18px;">${sc.val}</td>
+      <td style="color:var(--muted);">${juryAvg ? sc.abw.toFixed(1) : '–'}</td>
+      <td style="color:var(--yellow);font-weight:700;">${juryAvg ? sc.pts.toFixed(1) : '–'}</td>
+    </tr>`;
+  }).filter(Boolean).join('');
+
+  if (userRows) {
+    html += `<table class="score-table">
+      <tr><th>Spieler</th><th>Wertung</th><th>Abw.</th><th>Pkte</th></tr>
+      ${userRows}
+    </table>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+// Show-Board: kumulierte Punkte aller Spieler bisher in der Show
+function buildShowBoard(all, label) {
+  const users = curUsers.length > 0 ? curUsers : getUsers();
+  const rows = users.map(u => {
+    const sc = calcUserScoreForShow(all, label, u);
+    return { u, pts: sc.pts, dances: sc.dances, col: getUserColor(u) };
+  }).sort((a,b) => b.pts - a.pts);
+
+  if (!rows.some(r => r.pts > 0)) return '';
+
+  let html = `<div class="sb-section">
+    <div class="sb-title">📊 Show-Stand · ${label}</div>
+    <table class="score-table">
+      <tr><th>Rang</th><th>Spieler</th><th>Tänze</th><th>Punkte</th></tr>`;
+  const medals = ['🥇','🥈','🥉'];
+  rows.forEach(({u, pts, dances, col}, i) => {
+    html += `<tr>
+      <td style="font-size:18px;">${medals[i]||'  '}</td>
+      <td><span style="color:${col};font-weight:700;">${u}</span></td>
+      <td style="color:var(--muted);font-size:12px;">${dances}</td>
+      <td style="font-family:'Bebas Neue',cursive;font-size:22px;color:var(--yellow);">${pts.toFixed(1)}</td>
+    </tr>`;
+  });
+  html += `</table></div>`;
+  return html;
+}
+
+// End-Board Show: Show-Abschluss mit Streak
+function buildEndBoardShow(all, label) {
+  const users = curUsers.length > 0 ? curUsers : getUsers();
+  const rows = users.map(u => {
+    const sc = calcUserScoreForShow(all, label, u);
+    const streak = calcShowStreak(all, label, u);
+    return { u, pts: sc.pts, dances: sc.dances, streak, col: getUserColor(u) };
+  }).sort((a,b) => b.pts - a.pts);
+
+  let html = `<div class="sb-section" style="border-color:var(--pink);">
+    <div class="sb-title" style="color:var(--pink);">🏁 Ergebnis · ${label}</div>
+    <table class="score-table">
+      <tr><th>Rang</th><th>Spieler</th><th>Punkte</th><th>Streak</th></tr>`;
+  const medals = ['🥇','🥈','🥉'];
+  rows.forEach(({u, pts, streak, col}, i) => {
+    html += `<tr>
+      <td style="font-size:18px;">${medals[i]||'  '}</td>
+      <td><span style="color:${col};font-weight:700;">${u}</span></td>
+      <td style="font-family:'Bebas Neue',cursive;font-size:22px;color:var(--yellow);">${pts.toFixed(1)}</td>
+      <td style="color:var(--green);font-weight:700;">${streak > 1 ? '🔥 '+streak : streak}</td>
+    </tr>`;
+  });
+  html += `</table></div>`;
+  return html;
+}
+
+// Saison-Board: Gesamtübersicht über alle Shows
+function buildSeasonBoard(all) {
+  const users = curUsers.length > 0 ? curUsers : getUsers();
+  const rows = users.map(u => {
+    const s = calcUserTotalScore(all, u);
+    const streak = calcStreak(all, u);
+    const showCount = Object.keys(s.byShow).length;
+    const best = Object.entries(s.byShow).sort((a,b)=>b[1]-a[1])[0];
+    return { u, total: s.total, streak, showCount, best, col: getUserColor(u) };
+  }).sort((a,b) => b.total - a.total);
+
+  if (!rows.some(r => r.total > 0)) return '';
+
+  let html = `<div class="sb-section" style="border-color:var(--yellow);">
+    <div class="sb-title" style="color:var(--yellow);">🏆 Saison-Gesamtstand</div>
+    <table class="score-table">
+      <tr><th>Rang</th><th>Spieler</th><th>Gesamt</th><th>Streak</th></tr>`;
+  const medals = ['🥇','🥈','🥉'];
+  rows.forEach(({u, total, streak, best, col}, i) => {
+    html += `<tr>
+      <td style="font-size:18px;">${medals[i]||'  '}</td>
+      <td>
+        <span style="color:${col};font-weight:700;">${u}</span>
+        ${best ? `<div style="font-size:10px;color:var(--muted);">Beste Show: ${best[0]} (${best[1].toFixed(1)} Pkt)</div>` : ''}
+      </td>
+      <td style="font-family:'Bebas Neue',cursive;font-size:22px;color:var(--yellow);">${total.toFixed(1)}</td>
+      <td style="color:var(--green);font-weight:700;">${streak > 1 ? '🔥 '+streak : streak}</td>
+    </tr>`;
+  });
+  html += `</table></div>`;
+  return html;
+}
+
+// Streak innerhalb einer einzelnen Show (wie viele Tänze in Folge war man am nächsten dran)
+function calcShowStreak(allSessions, round, userName) {
+  const users = getUsers();
+  const showSessions = Object.values(allSessions).filter(s=>s.round===round);
+  if (!showSessions.length) return 0;
+  const sRef = showSessions.reduce((a,b)=>(b.pairs?.length||0)>(a.pairs?.length||0)?b:a);
+  let streak = 0, maxStreak = 0;
+  sRef.pairs.forEach((pair, pi) => {
+    pair.dances.forEach((_, di) => {
+      if (!isTanzFrozen(allSessions, round, pair.promi, di)) return;
+      const avg = calcJuryAvg(allSessions, round, pair.promi, di);
+      if (!avg) return;
+      let bestAbw = Infinity, bestUser = null;
+      users.forEach(u => {
+        const sc = calcUserScoreForDance(allSessions, round, pair.promi, di, u);
+        if (sc && sc.abw < bestAbw) { bestAbw = sc.abw; bestUser = u; }
+      });
+      if (bestUser === userName) { streak++; maxStreak = Math.max(maxStreak, streak); }
+      else streak = 0;
+    });
+  });
+  return maxStreak;
+}
+
+// Wie viele Tänze wurden vollständig bewertet BEVOR dieser Tanz (pi,di)?
+function countDoneDancesBefore(pi, di) {
+  let count = 0;
+  cur.pairs.forEach((_, pIdx) => {
+    cur.pairs[pIdx].dances.forEach((_, dIdx) => {
+      if (pIdx === pi && dIdx === di) return; // stop at current
+      const key = `${pIdx}-${dIdx}`;
+      if (curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key)) count++;
+    });
+  });
+  return count;
+}
+
+function showPairResult(pi, di, isLast) {
   showScreen('pair-result');
   const all = getAllSessions();
-  const p = cur.pairs[pi];
+  const doneBefore = countDoneDancesBefore(pi, di);
 
-  // Build result card for this pair (reuse showDanceResult logic inline)
-  let html = `<div style="font-family:'Bebas Neue',cursive;font-size:22px;color:var(--yellow);letter-spacing:2px;margin-bottom:14px;">
-    🏆 Auswertung: ${p.promi}
-  </div>`;
+  let html = '';
 
-  p.dances.forEach((_, di) => {
-    const danceName = cur.danceNames[pi][di] || `Tanz ${di+1}`;
-    const jl = calcOfficialJuror(all, cur.round, p.promi, di, 'llambi');
-    const jm = calcOfficialJuror(all, cur.round, p.promi, di, 'motsi');
-    const jj = calcOfficialJuror(all, cur.round, p.promi, di, 'jorge');
-    const juryAvg = (jj && jm && jl) ? ((jj.modus + jm.modus + jl.modus) / 3) : null;
+  // ── 1. TANZ-BOARD (immer) ──
+  html += buildDanceBoard(pi, di, all);
 
-    html += `<div class="ibox" style="margin-bottom:10px;">
-      <div class="it">${danceName}</div>`;
+  // ── 2. SHOW-BOARD (ab zweitem Tanz, nicht beim letzten) ──
+  if (doneBefore >= 1 && !isLast) {
+    html += buildShowBoard(all, cur.round);
+  }
 
-    // Jury pills
-    if (jj || jm || jl) {
-      html += `<div class="jury-consensus" style="margin-bottom:10px;">
-        ${[{j:jj,n:'Jorge',cls:'jorge'},{j:jm,n:'Motsi',cls:'motsi'},{j:jl,n:'Llambi',cls:'llambi'}].map(({j,n,cls}) => j ? `
-        <div class="jc-pill">
-          <div class="jcp-name ${cls}">${n}</div>
-          <div class="jcp-val" style="color:var(--${cls==='jorge'?'blue':cls==='motsi'?'purple':'pink'})">${j.modus}</div>
-        </div>` : '').join('')}
-        ${juryAvg ? `<div class="jc-pill full"><div class="jcp-name" style="color:var(--green);">Ø</div><div class="jcp-val" style="color:var(--green);">${juryAvg.toFixed(1)}</div></div>` : ''}
-      </div>`;
-    }
-
-    // User scores + points
-    const users = getUsers();
-    const userRows = users.map(u => {
-      const sc = calcUserScoreForDance(all, cur.round, p.promi, di, u);
-      if (!sc) return '';
-      const col = getUserColor(u);
-      return `<tr>
-        <td><span style="color:${col};font-weight:700;">${u}</span></td>
-        <td style="font-family:'Bebas Neue',cursive;font-size:18px;">${sc.val}</td>
-        <td style="color:var(--muted);">${juryAvg ? sc.abw.toFixed(1) : '–'}</td>
-        <td style="color:var(--yellow);font-weight:700;">${juryAvg ? sc.pts.toFixed(1) : '–'}</td>
-      </tr>`;
-    }).filter(Boolean).join('');
-
-    if (userRows) {
-      html += `<table class="score-table">
-        <tr><th>Spieler</th><th>Wertung</th><th>Abw.</th><th>Punkte</th></tr>
-        ${userRows}
-      </table>`;
-    }
-    html += `</div>`;
-  });
+  // ── 3. END-BOARD SHOW + SAISON-BOARD (letzter Tanz) ──
+  if (isLast) {
+    html += buildEndBoardShow(all, cur.round);
+    html += buildSeasonBoard(all);
+  }
 
   document.getElementById('pair-result-content').innerHTML = html;
 
-  // Button
   const btn = document.getElementById('pair-result-next-btn');
   if (isLast) {
-    btn.textContent = '🏆 GESAMTAUSWERTUNG →';
+    btn.textContent = '❌ Ausscheidung eingeben →';
     btn.className = 'btn gold';
   } else {
-    btn.textContent = '▶ NÄCHSTES PAAR';
+    btn.textContent = '▶ WEITER';
     btn.className = 'btn';
   }
 }
 
 window.proceedAfterPairResult = function() {
   const isLast = cur.pairs.every((_,pi) =>
-    curUsers.every(u => cur.pairDone[u]?.has(pi)) && cur.pairJuryDone.has(pi)
+    cur.pairs[pi].dances.every((_,di) => {
+      const key = `${pi}-${di}`;
+      return curUsers.every(u => cur.pairDone[u]?.has(key)) && cur.pairJuryDone.has(key);
+    })
   );
   if (isLast) {
-    showFinalResults();
+    showEliminationScreen();
   } else {
     showScreen('dashboard');
     renderDashboard();
@@ -1759,34 +1918,9 @@ window.confirmElimination = function() {
 window.showFinalResults = function() {
   showScreen('final');
   const all = getAllSessions();
-  const users = getUsers();
-
-  let html = `<div style="font-family:'Bebas Neue',cursive;font-size:26px;color:var(--yellow);letter-spacing:3px;margin-bottom:16px;">
-    🏆 Gesamtauswertung · ${cur.round}
-  </div>`;
-
-  // Leaderboard der Nutzer
-  const scores = users.map(u => {
-    const s = calcUserTotalScore(all, u);
-    return { u, total: s.total, col: getUserColor(u) };
-  }).sort((a,b)=>b.total-a.total);
-
-  if (scores.length > 1) {
-    html += `<div class="ibox" style="margin-bottom:14px;"><div class="it">🏅 Spieler-Ranking</div>`;
-    scores.forEach(({u, total, col}, i) => {
-      const medals = ['🥇','🥈','🥉'];
-      html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
-        <span style="font-size:20px;">${medals[i]||'  '}</span>
-        <div class="lb-avatar" style="background:${col};">${getInitials(u)}</div>
-        <div style="flex:1;"><div style="font-weight:700;">${u}</div></div>
-        <div style="font-family:'Bebas Neue',cursive;font-size:24px;color:var(--yellow);">${total.toFixed(1)}</div>
-      </div>`;
-    });
-    html += `</div>`;
-  }
-
-  // Pro Paar: Zusammenfassung
-  html += `<div class="ibox"><div class="it">📋 Alle Paare</div>`;
+  let html = buildEndBoardShow(all, cur.round) + buildSeasonBoard(all);
+  // Paar-Übersicht mit Jury-Summen
+  html += `<div class="sb-section"><div class="sb-title">📋 Alle Paare</div>`;
   cur.pairs.forEach((p,pi) => {
     const juryTotal = p.dances.reduce((sum,_,di) => {
       const js = cur.juryScores[pi][di];
@@ -1801,7 +1935,6 @@ window.showFinalResults = function() {
     </div>`;
   });
   html += `</div>`;
-
   document.getElementById('final-content').innerHTML = html;
 };
 
