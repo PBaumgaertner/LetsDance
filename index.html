@@ -384,30 +384,6 @@
     <button class="btn" onclick="startRating()">▶ WERTUNG STARTEN</button>
   </div>
 
-  <!-- ÜBERGABE-MASKE: Gerät weitergeben -->
-  <div id="handover-screen" style="display:none;">
-    <div style="text-align:center;padding:40px 20px;">
-      <div style="font-size:60px;margin-bottom:16px;">🤝</div>
-      <div style="font-family:'Bebas Neue',cursive;font-size:28px;letter-spacing:2px;color:var(--pink);margin-bottom:8px;">Gerät weitergeben</div>
-      <div style="font-size:15px;color:var(--muted);margin-bottom:6px;">Jetzt ist dran:</div>
-      <div id="handover-name" style="font-family:'Bebas Neue',cursive;font-size:40px;letter-spacing:3px;color:var(--yellow);margin-bottom:24px;"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:28px;" id="handover-info"></div>
-      <button class="btn" onclick="startNextUserPhase()">▶ ICH BIN BEREIT</button>
-    </div>
-  </div>
-
-  <!-- JURY-ÜBERGABE-MASKE -->
-  <div id="jury-handover-screen" style="display:none;">
-    <div style="text-align:center;padding:40px 20px;">
-      <div style="font-size:60px;margin-bottom:16px;">⚖️</div>
-      <div style="font-family:'Bebas Neue',cursive;font-size:28px;letter-spacing:2px;color:var(--green);margin-bottom:8px;">Jury-Eingabe</div>
-      <div style="font-size:15px;color:var(--muted);margin-bottom:6px;">Jetzt bitte:</div>
-      <div id="jury-handover-name" style="font-family:'Bebas Neue',cursive;font-size:36px;letter-spacing:3px;color:var(--yellow);margin-bottom:24px;"></div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:28px;">Alle persönlichen Wertungen sind abgeschlossen.<br>Jetzt die Jury-Punkte eingeben.</div>
-      <button class="btn gold" onclick="startJuryPhase()">⚖️ JURY-WERTUNG STARTEN</button>
-    </div>
-  </div>
-
   <div id="rating" style="display:none;">
     <div class="sbar" id="sbar"></div>
 
@@ -1264,8 +1240,6 @@ window.startRating = async function() {
   activePairIdx = null;
 
   document.getElementById('setup').style.display = 'none';
-  document.getElementById('handover-screen').style.display = 'none';
-  document.getElementById('jury-handover-screen').style.display = 'none';
   document.getElementById('rating').style.display = 'block';
 
   buildSbar();
@@ -1441,10 +1415,7 @@ function buildUserScoringCard(pi, userName, frozen) {
   return p.dances.map((_, di) => {
     const val = cur.userScores[userName]?.[pi]?.[di] || 0;
     const danceName = cur.danceNames[pi][di] || ('Tanz ' + (di+1));
-    return `<div class="dpanel ${di===0?'active':''}" id="dp-${pi}-${di}">
-      <div style="padding:12px 16px;">
-        <div class="field" style="margin-bottom:10px;">
-          <label>Tanzstil (optional)</label>
+    return `<div class="dpanel ${di===0?'active':''}" id="udp-${pi}-${di}">
           <input type="text" placeholder="z. B. Cha-Cha-Cha…" value="${cur.danceNames[pi][di]||''}" ${dis}
             oninput="cur.danceNames[${pi}][${di}]=this.value">
         </div>
@@ -1461,10 +1432,46 @@ function buildUserScoringCard(pi, userName, frozen) {
       </div>
     </div>`;
   }).join('') + (p.dances.length > 1 ?
-    `<div class="dtabs" id="dtabs-${pi}" style="order:-1;">${p.dances.map((_,di)=>
+    `<div class="dtabs" id="udtabs-${pi}" style="order:-1;">${p.dances.map((_,di)=>
       `<button class="dtab ${di===0?'active':''}" onclick="switchD(${pi},${di})">${cur.danceNames[pi][di]||'Tanz '+(di+1)}</button>`
     ).join('')}</div>` : '');
 }
+
+// ── BUTTON-INTERAKTIONEN ─────────────────────────────────
+window.switchD = function(pi, di) {
+  // Works for both scoring and jury containers
+  ['scoring-content','jury-content'].forEach(containerId => {
+    const con = document.getElementById(containerId);
+    if (!con) return;
+    con.querySelectorAll('.dtab').forEach((t,i) => t.classList.toggle('active', i===di));
+    con.querySelectorAll('.dpanel').forEach((p,i) => p.classList.toggle('active', i===di));
+  });
+};
+
+window.setUS = function(pi, di, userName, val) {
+  if (!cur.userScores[userName]) cur.userScores[userName] = [];
+  if (!cur.userScores[userName][pi]) cur.userScores[userName][pi] = [];
+  cur.userScores[userName][pi][di] = val;
+  const col = getUserColor(userName);
+  const safeU = userName.replace(/[^a-zA-Z0-9]/g, '_');
+  document.querySelectorAll(`#sb-${pi}-${di}-${safeU} .sb`).forEach(b => {
+    const active = +b.dataset.v === val;
+    b.className = 'sb' + (active ? ' ay' : '');
+    b.style.background = active ? col : '';
+    b.style.borderColor = active ? col : '';
+    b.style.color = active ? '#000' : '';
+  });
+};
+
+window.setJS = function(pi, di, juror, val) {
+  if (!cur.juryScores[pi]) cur.juryScores[pi] = [];
+  if (!cur.juryScores[pi][di]) cur.juryScores[pi][di] = {jorge:0, motsi:0, llambi:0};
+  cur.juryScores[pi][di][juror] = val;
+  const clsMap = {llambi:'al', motsi:'am', jorge:'aj'};
+  document.querySelectorAll(`#sb-${pi}-${di}-${juror} .sb`).forEach(b => {
+    b.className = 'sb' + (+b.dataset.v === val ? ' '+clsMap[juror] : '');
+  });
+};
 
 window.finishUserScoring = function() {
   const pi = activePairIdx;
@@ -1635,7 +1642,7 @@ function showPairResult(pi, isLast) {
       const col = getUserColor(u);
       return `<tr>
         <td><span style="color:${col};font-weight:700;">${u}</span></td>
-        <td style="font-family:'Bebas Neue',cursive;font-size:18px;">${sc.you}</td>
+        <td style="font-family:'Bebas Neue',cursive;font-size:18px;">${sc.val}</td>
         <td style="color:var(--muted);">${juryAvg ? sc.abw.toFixed(1) : '–'}</td>
         <td style="color:var(--yellow);font-weight:700;">${juryAvg ? sc.pts.toFixed(1) : '–'}</td>
       </tr>`;
@@ -1876,8 +1883,6 @@ window.saveSession = saveAllAndBack;
 window.backToSetup = function() {
   document.getElementById('setup').style.display = 'block';
   document.getElementById('rating').style.display = 'none';
-  document.getElementById('handover-screen').style.display = 'none';
-  document.getElementById('jury-handover-screen').style.display = 'none';
   cur = null; curUsers = [];
   ratingPhase = 'dashboard'; ratingUserIdx = 0; activePairIdx = null;
 };
