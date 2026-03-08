@@ -1331,7 +1331,7 @@ function renderDashboard() {
         } else if (tanzDone) {
           btnStyle = 'border-color:#556;color:var(--muted);';
           btnLabel = `✅ ${tanzLabel}`;
-          btnClick = `startPairDance(${pi},${di})`;
+          btnClick = `openDanceFrozen(${pi},${di})`;
         } else if (needsJury) {
           btnStyle = 'border-color:var(--green);color:var(--green);';
           btnLabel = `⚖️ ${tanzLabel}`;
@@ -1367,7 +1367,7 @@ function renderDashboard() {
         clickFn = `openDanceFrozen(${pi},0)`;
       } else if (tanzDone) {
         statusText = '✅ Abgeschlossen'; icon = '✅'; clickable = true;
-        clickFn = `startPairDance(${pi},0)`;
+        clickFn = `openDanceFrozen(${pi},0)`;
       } else if (needsJury) {
         statusText = '⚖️ Jury eingeben'; icon = '⚖️'; clickable = true;
         clickFn = `startPairDance(${pi},0)`;
@@ -1412,26 +1412,39 @@ window.startPairDance = function(pi, di) {
 
   const key = `${pi}-${di}`;
   const firstPending = curUsers.findIndex(u => !cur.pairDone[u]?.has(key));
+
   if (firstPending === -1) {
-    // All users done – check jury
+    // All users done
     if (cur.isJuryOwner && !cur.pairJuryDone.has(key)) {
+      // Jury still open → go to jury
       showJuryScreen(pi, di);
     } else {
-      // Already fully done – re-open scoring for editing
-      showScoringScreen(pi, di, 0);
+      // Fully done (not frozen) → show read-only result for this dance
+      const all = getAllSessions();
+      window._pairResultBack = true;
+      document.getElementById('setup').style.display = 'none';
+      document.getElementById('rating').style.display = 'block';
+      showScreen('pair-result');
+      document.getElementById('pair-result-content').innerHTML = buildDanceBoard(pi, di, all);
+      const btn = document.getElementById('pair-result-next-btn');
+      btn.textContent = '← Zurück';
+      btn.className = 'btn sec';
     }
     return;
   }
+
   ratingUserIdx = firstPending;
   showScoringScreen(pi, di, ratingUserIdx);
 };
 
-// Eingefroren: nur Auswertung zeigen (read-only)
+// Eingefroren oder abgeschlossen: Auswertung zeigen (read-only)
 window.openDanceFrozen = function(pi, di) {
   activePairIdx = pi;
   activeDanceIdx = di;
   window._pairResultBack = true;
   const all = getAllSessions();
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('rating').style.display = 'block';
   showScreen('pair-result');
   document.getElementById('pair-result-content').innerHTML = buildDanceBoard(pi, di, all);
   const btn = document.getElementById('pair-result-next-btn');
@@ -2580,6 +2593,11 @@ window._ld_register({
   proceedAfterPairResult, showFinalResults, saveAllAndBack,
   showEliminationScreen, selectEliminatedPair, cancelElimination, confirmElimination
 });
+
+// Explizit sicherstellen dass onclick-Attribute diese Funktionen global finden
+window.openDanceFrozen = openDanceFrozen;
+window.startPairDance = startPairDance;
+window.startPairRound = startPairRound;
 
 init();
 </script>
