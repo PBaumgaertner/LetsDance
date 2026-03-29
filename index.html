@@ -1821,7 +1821,12 @@ function buildEndBoardShow(all, label) {
 
 // Saison-Board: Gesamtübersicht über alle Shows
 function buildSeasonBoard(all) {
-  const users = curUsers.length > 0 ? curUsers : getUsers();
+  // Collect ALL users who ever participated across any saved session
+  const allUserNames = [...new Set([
+    ...Object.values(all).map(s => s.userName).filter(Boolean),
+    ...getUsers()
+  ])];
+  const users = allUserNames.length > 0 ? allUserNames : (curUsers.length > 0 ? curUsers : getUsers());
   const rows = users.map(u => {
     const s = calcUserTotalScore(all, u);
     const streak = calcStreak(all, u);
@@ -2534,7 +2539,11 @@ function populateLbShowFilter() {
 window.renderLeaderboard = function() {
   const el = document.getElementById('leaderboard-content');
   const all = getAllSessions();
-  const users = getUsers();
+  // Collect all users from registered list + saved sessions (cross-device)
+  const users = [...new Set([
+    ...getUsers(),
+    ...Object.values(all).map(s => s.userName).filter(Boolean)
+  ])];
   if (!users.length) { el.innerHTML='<div class="empty"><div class="ei">👤</div><p>Noch keine Nutzer.</p></div>'; return; }
 
   let scores;
