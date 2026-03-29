@@ -518,6 +518,10 @@
   <div class="ibox">
     <div class="it">🗂 Lokale Daten</div>
     <button class="btn sec" onclick="exportLocal()" style="margin-bottom:8px;">📤 Als JSON exportieren</button>
+    <label class="btn sec" style="margin-bottom:8px;display:block;text-align:center;cursor:pointer;">
+      📥 JSON importieren
+      <input type="file" accept=".json" onchange="importLocal(event)" style="display:none;">
+    </label>
     <button class="btn danger" onclick="clearLocal()">🗑 Alle lokalen Daten löschen</button>
   </div>
 </div>
@@ -2593,6 +2597,54 @@ window.exportLocal = function() {
   const a = document.createElement('a'); a.href=url; a.download=`letsdance2026_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(url);
   showToast('Export gestartet!');
 };
+
+window.importLocal = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+
+      // Merge sessions (existing keys stay, imported keys fill gaps)
+      if (data.sessions && typeof data.sessions === 'object') {
+        const existing = getLocalSessions();
+        const merged = { ...data.sessions, ...existing }; // existing wins on conflict
+        localStorage.setItem(LS_SESSIONS, JSON.stringify(merged));
+      }
+
+      // Merge juryMeta
+      if (data.juryMeta && typeof data.juryMeta === 'object') {
+        const existingJury = getLocalJuryMeta();
+        const mergedJury = { ...data.juryMeta, ...existingJury };
+        localStorage.setItem('ld26_jury_meta', JSON.stringify(mergedJury));
+      }
+
+      // Merge userColors (imported fills gaps, existing wins)
+      if (data.userColors && typeof data.userColors === 'object') {
+        const existingColors = getUserColorMap();
+        const mergedColors = { ...data.userColors, ...existingColors };
+        localStorage.setItem('ld26_user_colors', JSON.stringify(mergedColors));
+      }
+
+      // Merge eliminated
+      if (data.eliminated && typeof data.eliminated === 'object') {
+        const existingEl = getEliminated();
+        const mergedEl = { ...data.eliminated, ...existingEl };
+        localStorage.setItem(LS_ELIMINATED, JSON.stringify(mergedEl));
+      }
+
+      // Reset file input so same file can be imported again if needed
+      event.target.value = '';
+      showToast('Import erfolgreich! Seite wird neu geladen…');
+      setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+      showToast('Fehler: Ungültige JSON-Datei', 'err');
+      event.target.value = '';
+    }
+  };
+  reader.readAsText(file);
+};
 window.clearLocal = function() {
   if (!confirm('Alle lokalen Daten löschen? (Sessions + Jury-Zuordnungen + Farben)')) return;
   localStorage.removeItem(LS_SESSIONS);
@@ -2617,7 +2669,7 @@ window._ld_register({
   setMode, saveFirebaseConfig, showTab, onShowChange, startRating,
   switchD, setUS, setJS, saveSession, backToSetup, showDanceResult,
   closeDanceResult, showShowSummary, closeShowSummary,
-  setLbView, renderLeaderboard, togH, exportLocal, clearLocal,
+  setLbView, renderLeaderboard, togH, exportLocal, importLocal, clearLocal,
   onMitspielerChange,
   startPairRound, startPairDance, openDanceFrozen,
   finishUserScoring, finishJuryScoring, proceedFromHandover,
@@ -2629,6 +2681,7 @@ window._ld_register({
 window.openDanceFrozen = openDanceFrozen;
 window.startPairDance = startPairDance;
 window.startPairRound = startPairRound;
+window.importLocal = importLocal;
 
 init();
 </script>
